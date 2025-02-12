@@ -38,12 +38,12 @@ data Entry : (a : Type) -> Type where
           -> Entry a
 
 ||| Stripe of a resource pool.
-||| If availible is 0, the list of threads
+||| If available is 0, the list of threads
 ||| waiting for a resource (each with an associated channel)
 ||| is squeue ++ reverse squeuer.
 public export
 data Stripe : (a : Type) -> Type where
-  MkStripe :  (availible : Nat)
+  MkStripe :  (available : Nat)
            -> (cache : List (Entry a))
            -> (squeue : SQueue a)
            -> (squeuer : SQueue a)
