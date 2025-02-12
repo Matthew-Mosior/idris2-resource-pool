@@ -1,0 +1,10 @@
+[custom.all.idris2-resource-pool]
+type = "local"
+path = "."
+ipkg = "idris2-resource-pool.ipkg"
+test = "test/test.ipkg"
+
+[custom.all.idris2-resource-pool-test]
+type = "local"
+path = "test"
+ipkg = "test.ipkg"
