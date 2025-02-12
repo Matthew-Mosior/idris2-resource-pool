@@ -1,7 +1,6 @@
 ||| Resource Pool Internals
 module Data.Pool.Internal
 
-import Data.Hashable
 import Data.Nat
 import System.Concurrency
 import Data.IORef
@@ -14,8 +13,8 @@ import Data.Array
 ||| Configuration of a Pool.
 ||| Constraints:
 ||| poolcachettl -> The smallest acceptable value is 0.5.
-||| poolnumstripes -> The smallest acceptable value is 1.
-||| poolmaxresources -> The smallest acceptable value is 1, poolmaxresources must not be smaller than poolnumstripes.
+||| poolmaxresources -> The smallest acceptable value is 1.
+||| poolnumstripes -> The smallest acceptable value is 1, poolnumstripes must not be larger than poolmaxresources.
 public export
 data PoolConfig : (a : Type) -> Type where
   MkPoolConfig :  (createresource : IO a)
