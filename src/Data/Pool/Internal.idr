@@ -3,7 +3,7 @@ module Data.Pool.Internal
 
 import Data.Nat
 import System.Concurrency
-import Data.IORef
+import IO.Async.Internal.Ref
 import Data.Array
 
 %language ElabReflection
