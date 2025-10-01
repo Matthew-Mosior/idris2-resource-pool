@@ -16,6 +16,10 @@ import IO.Async.Internal.Ref
 
 %default total
 
+--------------------------------------------------------------------------------
+--          Configuration
+--------------------------------------------------------------------------------
+
 ||| Create a PoolConfig with optional parameters having default values.
 export
 defaultPoolConfig :  IO a                     -- The action that creates a new resource.
@@ -52,6 +56,28 @@ setNumStripes (MkPoolConfig create free cachettl (maxres ** prfmaxres) _ pclabel
                (maxres ** prfmaxres)
                numstripes
                pclabel
+
+||| Assign a label to the pool.
+export
+setPoolLabel :  String
+             -> PoolConfig a
+             -> PoolConfig a
+setPoolLabel label pc =
+  { pclabel := label } pc
+
+--------------------------------------------------------------------------------
+--          Resource Management
+--------------------------------------------------------------------------------
+
+||| Take a resource from the pool, following the same results as `withResource`.
+|||
+||| This function returns both a resource and the `LocalPool` it came
+||| from so that it may either be destroyed (via `destroyResource`) or returned
+||| to the pool (via `putResource`).
+takeResource :  Pool1 World a
+             -> F1 World (a, LocalPool1 s a)
+takeResource pool = mask_ $ do
+
 
 ||| Free resource entries in the stripes that fulfil a given condition.
 export
