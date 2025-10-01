@@ -16,13 +16,14 @@ import Data.So
 ||| poolmaxresources -> The smallest acceptable value is 1.
 ||| poolnumstripes -> The smallest acceptable value is 1, poolnumstripes must not be larger than poolmaxresources.
 public export
-data PoolConfig : (a : Type) -> Type where
-  MkPoolConfig :  (createresource   : IO a)
-               -> (freeresource     : (a -> IO ()))
-               -> (poolcachettl     : (ttl : Double) -> {auto prf : So (0.5 <= ttl)} -> Double)
-               -> (poolmaxresources : (maxres ** LTE 1 maxres))
-               -> (poolnumstripes   : Maybe (n ** (LTE 1 n, LTE n (fst poolmaxresources)))) 
-               -> PoolConfig a
+record PoolConfig a where
+  constructor MkPoolConfig
+  createresource   : IO a
+  freeresource     : a -> IO ()
+  poolcachettl     : (ttl : Double) -> {auto prf : So (0.5 <= ttl)} -> Double
+  poolmaxresources : (maxres ** LTE 1 maxres)
+  poolnumstripes   : Maybe (n ** (LTE 1 n, LTE n (fst poolmaxresources)))
+  poolconfiglabel  : String
 
 ||| A queue of linear mutable references
 ||| corresponding to threads waiting for resources.
