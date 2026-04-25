@@ -1,13 +1,14 @@
-package idris2-resource-pool
+package resource-pool
 
 authors   = "Matthew Mosior"
 brief     = "A high-performance striped resource pooling implementation"
 version   = 0.1.0
 sourcedir = "src"
 depends   = base >= 0.6.0
-          , async
           , array
+          , elin
           , hashable
+          , posix
           , ref1
 modules   = Data.Pool
           , Data.Pool.Internal
