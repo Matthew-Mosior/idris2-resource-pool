@@ -346,12 +346,14 @@ putTMVar1 (MkTMVar1 ref waiters) val t =
 export
 waitForResource :  TMVar1 World (Maybe a)
                 -> Stripe1 World a
-                -> IO (Maybe a)
-waitForResource q mstripe = do
-  Right res <- runElinIO (waitForResource' q mstripe)
-    | Left err =>
-        assert_total $ idris_crash "Data.Pool.destroyResource: \{show err}"
-  pure res
+                -> F1 World (Maybe a)
+waitForResource q mstripe t =
+  let res # t := ioToF1 (runElinIO (waitForResource' q mstripe)) t
+    in case res of
+         Right res =>
+           res # t
+         Left err =>
+           (assert_total $ idris_crash "Data.Pool.waitForResource: \{show err}") # t
   where
     cleanup' :  TMVar1 World (Maybe a)
              -> Stripe1 World a
@@ -384,12 +386,14 @@ export
 destroyResource :  Pool1 World a
                 -> LocalPool1 World a
                 -> a
-                -> IO ()
-destroyResource pool lp x = do
-  Right _ <- runElinIO (destroy pool lp x)
-    | Left err =>
-        assert_total $ idris_crash "Data.Pool.destroyResource: \{show err}"
-  pure ()
+                -> F1' World
+destroyResource pool lp x t =
+  let res # t := ioToF1 (runElinIO (destroy pool lp x)) t
+    in case res of
+         Right _  =>
+           () # t
+         Left err =>
+          (assert_total $ idris_crash "Data.Pool.destroyResource: \{show err}") # t
   where
     destroy' :  LocalPool1 World a
              -> F1' World
@@ -426,12 +430,14 @@ private
 cleanStripe :  (Entry a -> Bool)
             -> (a -> IO ())
             -> Stripe1 World a
-            -> IO ()
-cleanStripe isstale free (MkStripe1 stripevar) = do
-  Right _ <- runElinIO (clean isstale free (MkStripe1 stripevar))
-    | Left err =>
-        assert_total $ idris_crash "Data.Pool.cleanStripe: \{show err}"
-  pure ()
+            -> F1' World
+cleanStripe isstale free (MkStripe1 stripevar) t =
+  let res # t := ioToF1 (runElinIO (clean isstale free (MkStripe1 stripevar))) t
+    in case res of
+         Right _ =>
+           () # t
+         Left err =>
+           (assert_total $ idris_crash "Data.Pool.cleanStripe: \{show err}") # t
   where
     clean' :  (Entry a -> Bool)
            -> (a -> IO ())
@@ -484,8 +490,17 @@ destroyAllResources (MkPool1 (MkPoolConfig _ freeresource _ _ _ _) _ _) localpoo
       () # t
     go o (S j) arr t =
       let MkLocalPool1 _ stripe1 _ # t := getIx arr j t
-          ()                       # t := ioToF1 (cleanStripe (const True) freeresource stripe1) t
+          ()                       # t := cleanStripe (const True) freeresource stripe1 t
         in go o j arr t
+
+{-
+private
+takeAvailableResource :  Pool1 World a
+                      -> LocalPool1 World a
+                      -> Stripe1 World a
+                      -> F1 World (a, LocalPool1 World a)
+takeAvailableResource pool lp stripe t =
+-}
 
 {-
 ||| Take a resource from the `Pool1 World a`, following the same
