@@ -44,7 +44,7 @@ defaultPoolConfig create free cachettl maxresources =
                Nothing
                ""
 
-||| Set the number of stripes in the pool.
+||| Set the number of stripes in the `PoolConfig a`.
 ||| If set to Nothing (the default value), the pool will create the amount of
 ||| stripes equal to the number of capabilities. This ensures that threads never
 ||| compete over access to the same stripe and results in a very good performance
@@ -61,7 +61,7 @@ setNumStripes (MkPoolConfig create free cachettl (maxres ** prfmaxres) _ pclabel
                numstripes
                pclabel
 
-||| Assign a label to the pool.
+||| Assign a label to the `PoolConfig a`.
 export
 setPoolLabel :  String
              -> PoolConfig a
@@ -73,7 +73,7 @@ setPoolLabel label pc =
 --          Resource Management
 --------------------------------------------------------------------------------
 
-||| Get a local pool.
+||| Get a `LocalPool World a`.
 private
 getLocalPool :  {n : Nat}
              -> MArray World n (LocalPool1 World a)
@@ -342,7 +342,7 @@ putTMVar1 (MkTMVar1 ref waiters) val t =
                            (rest, Just w)
                      ) t
 
-||| Wait for the resource to be put into a given `Ref`.
+||| Wait for the resource to be put into a given `TMVar1 World a`.
 export
 waitForResource :  TMVar1 World (Maybe a)
                 -> Stripe1 World a
