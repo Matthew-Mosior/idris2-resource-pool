@@ -493,14 +493,62 @@ destroyAllResources (MkPool1 (MkPoolConfig _ freeresource _ _ _ _) _ _) localpoo
           ()                       # t := cleanStripe (const True) freeresource stripe1 t
         in go o j arr t
 
-{-
+
+||| If an exception is received while a resource is being created, restore the
+||| original size of the `Stripe1 World a`.
+export
+restoreSize :  Stripe1 World a
+            -> F1' World
+restoreSize (MkStripe1 stripevar) t =
+  casupdate1 stripevar (\(MkStripe available cache queue queuer) =>
+                         (MkStripe (plus available 1) cache queue queuer, ())
+                       ) t
+
 private
 takeAvailableResource :  Pool1 World a
                       -> LocalPool1 World a
                       -> Stripe1 World a
                       -> F1 World (a, LocalPool1 World a)
 takeAvailableResource pool lp stripe t =
--}
+  takeAvailableResource' pool lp stripe t
+  where
+    takeAvailableResource'' :  MCancel (Elin World)
+                            => Pool1 World a
+                            -> LocalPool1 World a
+                            -> Elin World [Errno] a
+    takeAvailableResource'' (MkPool1 (MkPoolConfig createresource _ _ _ _ _) _ _) (MkLocalPool1 _ stripe _) =
+      onAbort (liftIO createresource) (runIO (restoreSize stripe))
+    takeAvailableResource' :  Pool1 World a
+                           -> LocalPool1 World a
+                           -> Stripe1 World a
+                           -> F1 World (a, LocalPool1 World a)
+    takeAvailableResource' pool@(MkPool1 (MkPoolConfig createresource _ _ _ _ _) _ _) lp@(MkLocalPool1 _ (MkStripe1 lpstripevar) _) (MkStripe1 stripevar) t =
+      let MkStripe _ cache _ _ # t := read1 stripevar t
+        in case cache of
+             []                =>
+               let ()     # t := casupdate1 stripevar (\(MkStripe available cache queue queuer) =>
+                                                        (MkStripe (minus available 1) cache queue queuer, ())
+                                                      ) t
+                   stripe # t := read1 stripevar t
+                   ()     # t := casupdate1 lpstripevar (\_ =>
+                                                          (stripe, ())
+                                                        ) t
+                   res    # t := ioToF1 (runElinIO (takeAvailableResource'' pool lp)) t
+                 in case res of
+                      Right res' =>
+                        (res', lp) # t
+                      Left err   =>
+                        (assert_total $ idris_crash "Data.Pool.takeAvailableResource.takeAvailableResource': \{show err}") # t
+             MkEntry x _ :: xs =>
+               let ()     # t := casupdate1 stripevar (\(MkStripe available cache queue queuer) =>
+                                                        (MkStripe (minus available 1) xs queue queuer, ())
+                                                      ) t
+                   stripe # t := read1 stripevar t
+                   ()     # t := casupdate1 lpstripevar (\_ =>
+                                                          (stripe, ())
+                                                        ) t
+                 in (x, lp) # t
+               
 
 {-
 ||| Take a resource from the `Pool1 World a`, following the same
