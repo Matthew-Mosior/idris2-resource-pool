@@ -763,3 +763,78 @@ withResource pool f t =
         res' <- onAbort (poll $ liftIO $ f res) (runIO (destroyResource (MkStripe1 striperef)))
         runIO (putResource (MkStripe1 striperef) res)
         pure res'
+
+||| Attempt to take a resource without blocking.
+|||
+||| Behavior:
+||| - Reads the local stripe and checks availability.
+||| - If no resources are available:
+|||   - Returns `Nothing` immediately.
+|||   - Does NOT enqueue a waiter.
+|||   - Does NOT create a resource.
+|||
+||| - If a resource is available:
+|||   - Removes it atomically via CAS.
+|||   - Returns `Just (resource, LocalPool1)`.
+|||
+||| Guarantees:
+||| - Non-blocking: never waits on a channel.
+||| - No side effects inside CAS.
+||| - No waiter allocation.
+||| - Safe under contention via CAS retry.
+|||
+export
+tryTakeResource :  {n : Nat}
+                -> Pool1 World n a
+                -> F1 World (Maybe (a, LocalPool1 World a))
+tryTakeResource pool@(MkPool1 _ localpools _) t =
+  let res # t := ioToF1 (runElinIO (tryTakeResource' pool)) t
+    in case res of
+         Right res'  =>
+           res' # t
+         Left err    =>
+           (assert_total $ idris_crash "Data.Pool.tryTakeResource: \{show err}") # t
+  where
+    tryTakeResource'' :  {n : Nat}
+                      -> MCancel (Elin World)
+                      => Pool1 World n a
+                      -> F1 World (Maybe (a, LocalPool1 World a))
+    tryTakeResource'' pool t =
+      let lp@(MkLocalPool1 _ stripe1@(MkStripe1 striperef) _) # t := getLocalPool localpools t
+          -- attempt fast-path only
+          res                                                 # t :=
+            casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled) =>
+                                    case (available == 0, cache) of
+                                      -- no capacity → do nothing
+                                      (True, _)                    =>
+                                        ( MkStripe available cache queue queuer nextid cancelled
+                                        , Nothing
+                                        )
+                                      -- cache hit → consume
+                                      (False, MkEntry v _ :: rest) =>
+                                        ( MkStripe (minus available 1)
+                                                   rest
+                                                   queue
+                                                   queuer
+                                                   nextid
+                                                   cancelled
+                                        , Just v
+                                        )
+                                      -- Defensive: available > 0 but cache empty
+                                      (False, [])                  =>
+                                        ( MkStripe available cache queue queuer nextid cancelled
+                                        , Nothing
+                                        )
+                                 ) t
+        in case res of
+             Nothing  =>
+               Nothing # t
+             Just v =>
+               Just (v, lp) # t
+    tryTakeResource' :  {n : Nat}
+                     -> MCancel (Elin World)
+                     => Pool1 World n a
+                     -> Elin World [Errno] (Maybe (a, LocalPool1 World a))
+    tryTakeResource' pool =
+      uncancelable $ \_ =>
+        runIO (tryTakeResource'' pool)
