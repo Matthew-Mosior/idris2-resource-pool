@@ -315,9 +315,9 @@ signal stripe@(MkStripe available cache queue queuer nextid cancelled) val =
            MkStripeStep (MkStripe (S available') cache' queue' queuer' nextid' cancelled')
                         [InsertWithTimestamp val']
          -- Waiter, but no value (rare / no-op)
-         (Just _, Nothing)                   =>
+         (Just (MkWaiter _ wake), Nothing)   =>
            MkStripeStep (MkStripe available' cache' queue' queuer' nextid' cancelled')
-                        [None]
+                        [Wake wake Nothing]
          -- Deliver value directly
          (Just (MkWaiter _ wake), Just val') =>
            MkStripeStep (MkStripe available' cache' queue' queuer' nextid' cancelled')
