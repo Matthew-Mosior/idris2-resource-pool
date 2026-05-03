@@ -805,12 +805,12 @@ tryTakeResource pool@(MkPool1 _ localpools _) t =
           res                                                 # t :=
             casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled) =>
                                     case (available == 0, cache) of
-                                      -- no capacity → do nothing
+                                      -- no capacity, do nothing
                                       (True, _)                    =>
                                         ( MkStripe available cache queue queuer nextid cancelled
                                         , Nothing
                                         )
-                                      -- cache hit → consume
+                                      -- cache hit, consume
                                       (False, MkEntry v _ :: rest) =>
                                         ( MkStripe (minus available 1)
                                                    rest
@@ -820,7 +820,7 @@ tryTakeResource pool@(MkPool1 _ localpools _) t =
                                                    cancelled
                                         , Just v
                                         )
-                                      -- Defensive: available > 0 but cache empty
+                                      -- available > 0, but cache empty
                                       (False, [])                  =>
                                         ( MkStripe available cache queue queuer nextid cancelled
                                         , Nothing
@@ -838,3 +838,76 @@ tryTakeResource pool@(MkPool1 _ localpools _) t =
     tryTakeResource' pool =
       uncancelable $ \_ =>
         runIO (tryTakeResource'' pool)
+
+||| Attempt to acquire and use a resource from the pool without blocking.
+|||
+||| Behavior:
+||| - Tries to take a resource immediately using `tryTakeResource`.
+||| - If no resource is available:
+|||  - Returns `Nothing` without blocking or creating a resource.
+||| - If a resource is available:
+|||  - Executes the provided function `f` with the resource.
+|||  - Returns `Just result` on success.
+|||
+||| Resource Handling:
+||| - The acquired resource is always returned to the pool via `putResource` after successful execution of `f`.
+||| - If an exception or cancellation occurs during `f`:
+|||  - The resource is destroyed using `destroyResource` instead of being returned.
+|||
+||| Cancellation Semantics:
+||| - The outer operation is `uncancelable`, ensuring:
+|||  - No resource is leaked between acquisition and release.
+||| - The user function `f` is executed under `poll`, meaning:
+|||  - It remains cancelable.
+||| - If cancellation occurs during `f`:
+|||  - The resource is safely discarded.
+|||  - The pool remains in a consistent state.
+|||
+||| Concurrency Guarantees:
+||| - Does not block waiting for a resource.
+||| - Does not enqueue a waiter.
+||| - All Stripe transitions (`putResource`, `destroyResource`) are performed via `casWithEffects`, ensuring:
+|||  - Atomic state updates.
+|||  - No duplicated side effects.
+|||  - Deterministic wake behavior.
+|||
+||| Failure Handling:
+||| - Any exception from `f` is propagated.
+||| - Internal pool errors result in a crash with diagnostic information.
+|||
+||| Returns:
+||| - `Nothing` if no resource was immediately available.
+||| - `Just r` if a resource was acquired and `f` completed successfully.
+|||
+||| Notes:
+||| - This function is the non-blocking counterpart to `withResource`.
+||| - It is useful when callers prefer to fallback rather than wait.
+|||
+export
+tryWithResource :  {n : Nat}
+                -> Pool1 World n a
+                -> (a -> IO r)
+                -> F1 World (Maybe r)
+tryWithResource pool f t =
+  let res # t := ioToF1 (runElinIO (tryWithResource' pool f)) t
+    in case res of
+         Right res' =>
+           res' # t
+         Left err    =>
+           (assert_total $ idris_crash "Data.Pool.tryWithResource: \{show err}") # t
+  where
+    tryWithResource' :  {n : Nat}
+                     -> MCancel (Elin World)
+                     => Pool1 World n a
+                     -> (a -> IO r)
+                     -> Elin World [Errno] (Maybe r)
+    tryWithResource' pool f =
+      uncancelable $ \poll => do
+        res <- runIO (tryTakeResource pool)
+        case res of
+          Nothing                                             =>
+            pure Nothing
+          Just (res', MkLocalPool1 _ (MkStripe1 striperef) _) => do
+            res'' <- onAbort (poll $ liftIO $ f res') (runIO (destroyResource (MkStripe1 striperef)))
+            runIO (putResource (MkStripe1 striperef) res')
+            pure $ Just res''
