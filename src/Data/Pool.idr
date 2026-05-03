@@ -582,7 +582,7 @@ takeResource pool@(MkPool1 poolconfig localpools _) t =
                                          )
                              ) t
       -- Run effects after commit
-      ()                # t := runEffects stripe1 effects t
+      ()                                                  # t := runEffects stripe1 effects t
     in case result of
          -- fast path
          Left v =>
