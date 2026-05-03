@@ -497,7 +497,7 @@ cleanStripe isstale free (MkStripe1 striperef) t =
 |||
 export
 destroyAllResources :  {n : Nat}
-                    -> Pool1 World a
+                    -> Pool1 World n a
                     -> MArray World n (LocalPool1 World a)
                     -> F1' World
 destroyAllResources (MkPool1 (MkPoolConfig _ freeresource _ _ _ _) _ _) localpools t =
@@ -543,7 +543,8 @@ restoreSize (MkStripe1 striperef) t =
         [None]
 
 export
-takeResource :  Pool1 World a
+takeResource :  {n : Nat}
+             -> Pool1 World n a
              -> F1 World (a, LocalPool1 World a)
 takeResource pool@(MkPool1 poolconfig localpools _) t =
   let lp@(MkLocalPool1 _ stripe1@(MkStripe1 striperef) _) # t := getLocalPool localpools t
@@ -608,7 +609,7 @@ takeResource pool@(MkPool1 poolconfig localpools _) t =
                              (v, lp) # t
                            Left err =>
                              (assert_total $ idris_crash "Data.Pool.takeResource: \{show err}") # t
-  where    
+  where
     createWithCleanup :  PoolConfig a
                       -> Stripe1 World a
                       -> Elin World [Errno] a

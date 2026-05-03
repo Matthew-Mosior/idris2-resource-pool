@@ -155,8 +155,8 @@ data LocalPool1 : (s : Type) -> (a : Type) -> Type where
 
 ||| Striped resource pool based on linear mutable references.
 public export
-data Pool1 : (s : Type) -> (a : Type) -> Type where
+data Pool1 : (s : Type) -> (n : Nat) -> (a : Type) -> Type where
   MkPool1 :  (poolconfig : PoolConfig a)
           -> (localpools : (MArray s n (LocalPool1 s a)))
           -> (reaperref : IORef ())
-          -> Pool1 s a
+          -> Pool1 s n a
