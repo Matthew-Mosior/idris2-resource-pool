@@ -426,7 +426,23 @@ export
 destroyResource :  Stripe1 World a
                 -> F1' World
 destroyResource (MkStripe1 striperef) t =
-  casWithEffects (MkStripe1 striperef) (\stripe => signal stripe Nothing) t
+  let res # t := ioToF1 (runElinIO (destroy (MkStripe1 striperef))) t
+    in case res of
+         Right _  =>
+           () # t
+         Left err =>
+           (assert_total $ idris_crash "Data.Pool.destroyResource: \{show err}") # t
+  where
+    destroy' :  Stripe1 World a
+             -> F1' World
+    destroy' (MkStripe1 striperef) t =
+      casWithEffects (MkStripe1 striperef) (\stripe => signal stripe Nothing) t
+    destroy :  MCancel (Elin World)
+            => Stripe1 World a
+            -> Elin World [Errno] ()
+    destroy (MkStripe1 striperef) =
+      uncancelable $ \_ =>
+        runIO (destroy' (MkStripe1 striperef))
 
 ||| Return a resource to the `Pool1 World a`.
 |||
@@ -463,7 +479,12 @@ cleanStripe :  (Entry a -> Bool)
             -> Stripe1 World a
             -> F1' World
 cleanStripe isstale free (MkStripe1 striperef) t =
-  casWithEffects (MkStripe1 striperef) step t
+  let res # t := ioToF1 (runElinIO (cleanStripe' (MkStripe1 striperef))) t
+    in case res of
+         Right _  =>
+           () # t
+         Left err =>
+           (assert_total $ idris_crash "Data.Pool.cleanStripe: \{show err}") # t
   where
     step :  Stripe a
          -> StripeStep a
@@ -478,6 +499,16 @@ cleanStripe isstale free (MkStripe1 striperef) t =
                  xs =>
                    [FreeMany free xs]
              )
+    cleanStripe'' :  Stripe1 World a
+                  -> F1' World
+    cleanStripe'' (MkStripe1 striperef) t =
+      casWithEffects (MkStripe1 striperef) step t
+    cleanStripe' :  MCancel (Elin World)
+                 => Stripe1 World a
+                 -> Elin World [Errno] ()
+    cleanStripe' (MkStripe1 striperef) =
+      uncancelable $ \_ =>
+        runIO (cleanStripe'' (MkStripe1 striperef))
 
 ||| Destroy all resources in all stripes in the `Pool1 World a`.
 |||
@@ -542,6 +573,58 @@ restoreSize (MkStripe1 striperef) t =
         (MkStripe (S available) cache queue queuer nextid cancelled)
         [None]
 
+||| Acquire a resource from the `Pool1 World a`.
+|||
+||| Behavior:
+||| - Attempts to take a resource from the local stripe.
+||| - Uses a single CAS step to decide between:
+|||  - Fast path: consume a cached resource immediately.
+|||  - Slow path: enqueue the current thread as a waiter.
+|||
+||| Fast Path:
+||| - If a cached resource is available:
+|||  - It is removed from the cache.
+|||  - The stripe’s available count is decremented.
+|||  - The resource is returned immediately.
+|||
+||| Slow Path:
+||| - If no cached resource is available:
+|||  - A `Waiter` is registered with a wake channel.
+|||  - The thread blocks via `waitForResource`.
+|||  - When woken:
+|||   - `Just a`, a resource was delivered, return it.
+|||   - `Nothing`, no resource available, proceed to creation.
+|||
+||| Resource Creation:
+||| - If the waiter is woken with `Nothing`, a new resource is created using the pool's `createResource` action.
+||| - Creation is wrapped in `onAbort` to ensure:
+|||  - If interrupted, the stripe's `available` count is restored.
+|||
+||| Concurrency Guarantees:
+||| - The decision (fast vs slow path) is made atomically via CAS.
+||| - No IO occurs during CAS evaluation.
+||| - Effects (if any) are executed only after CAS commit.
+||| - Waiters are woken in FIFO order, excluding cancelled waiters.
+||| - No lost wakeups: every enqueued waiter is eventually woken.
+|||
+||| Failure Handling:
+||| - Exceptions during resource creation are propagated.
+||| - Stripe state is restored on aborted creation.
+|||
+||| Returns:
+||| - A tuple of:
+|||  - The acquired resource `a`.
+|||  - The `LocalPool1 World a` from which it was taken.
+|||
+||| Notes:
+||| - Channel allocation occurs before CAS but is only used on the slow path.
+||| - This function does not itself enforce global pool limits, it relies on stripe-level accounting (`available`) to maintain bounds.
+|||
+||| Invariants:
+||| - `available` reflects capacity for new resource creation.
+||| - Cached entries are always timestamped before insertion.
+||| - Waiters are only stored in the stripe and never mutated externally.
+|||
 export
 takeResource :  {n : Nat}
              -> Pool1 World n a
@@ -615,3 +698,26 @@ takeResource pool@(MkPool1 poolconfig localpools _) t =
                       -> Elin World [Errno] a
     createWithCleanup (MkPoolConfig createResource _ _ _ _ _) stripe =
       onAbort (liftIO createResource) (runIO (restoreSize stripe))
+
+{-
+export
+withResource :  Pool1 World a
+             -> (a -> IO r)
+             -> F1 World r
+withResource pool t =
+  let (res, localpool) # t := takeResource pool t
+      res'             # t := ioToF1 (runElinIO (waitForResource' mstripe wid wake)) t
+    in case res' of
+         Right res'' =>
+           res' # t
+         Left err    =>
+           (assert_total $ idris_crash "Data.Pool.withResource: \{show err}") # t
+  where
+    withResource' :  MCancel (Elin World)
+                  => Stripe1 World a
+                  -> Nat
+                  -> Channel (Maybe a)
+                  -> Elin World [Errno] (Maybe a)
+    withResource' mstripe wid wake =
+      onAbort (runIO (waitForResource'' wake)) (runIO (cleanup mstripe wid))
+-}
