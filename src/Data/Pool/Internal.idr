@@ -45,67 +45,25 @@ data Queue a
   = QNode a (Queue a)
   | QEnd
 
-||| A single waiting thread for a `TMVar1`.
+||| A pure waiting token representing a blocked thread.
 |||
-||| A `Waiter1` splits synchronization into two parts:
-||| 1. `slot` (shared state):
-|||  - A mutable cell where a producer writes the result:
-|||   - `Nothing`  => the waiter is still waiting
-|||   - `Just x`   => a value has been delivered OR the waiter is dead/canceled
-||| 2. `wake` (notification):
-|||  - A channel used to block the thread and wake it once a value is ready.
+||| This contains no mutable state. All lifecycle tracking is handled
+||| by the Stripe during dequeue / cancellation.
 |||
-||| Invariants:
-||| - A producer MUST write to `slot` before signaling `wake`.
-||| - A waiter MUST read `slot` after being woken.
-|||
-||| This design emulates STM-style shared ownership (`TMVar`)
-||| while using channels for efficient blocking.
-public export
-data Waiter1 : (s : Type) -> (a : Type) -> Type where
-  MkWaiter1 :  (slot : Ref s (Maybe a))
-            -> (wake : Channel ())
-            -> Waiter1 s a
-
-||| A single-element concurrent container with blocking semantics.
-|||
-||| `TMVar1` is a CAS + channel-based reimplementation of the semantics of
-||| a `TMVar` from Haskell.
-|||
-||| It consists of:
-||| 1. `ref`:
-|||  - The shared slot holding the value.
-|||   - `Nothing`  => empty
-|||   - `Just x`   => full
-||| 2. `waiters`:
-|||  - A queue of threads waiting to take a value.
-|||  - Each waiter is represented by a `Waiter1`, which provides:
-|||   - A shared slot for value handoff
-|||   - A channel for blocking/wakeup
-|||
-||| Semantics:
-||| - `takeTMVar1`:
-|||  - Reads from `ref` if available.
-|||  - Otherwise enqueues a waiter and blocks.
-||| - `putTMVar1`:
-|||  - If a waiter exists, delivers the value directly (bypassing `ref`).
-|||  - Otherwise stores the value in `ref`.
-|||  - Retries if already full.
+||| Fields:
+||| - `id`   : unique identifier for cancellation tracking
+||| - `wake` : channel used to unblock the thread
 |||
 ||| Invariants:
-||| - No lost wakeups: enqueue is always followed by a re-check
-||| - A waiter is woken if and only if its `slot` has been filled
-||| - Dead/canceled waiters are detected via their `slot`
+||| - Waiter is immutable
+||| - Wake is single-use
+||| - Cancellation is handled by Stripe (not locally)
 |||
-||| This structure provides STM-like behavior using:
-||| - CAS for atomicity
-||| - explicit queues for scheduling
-||| - channels for blocking
 public export
-data TMVar1 : (s : Type) -> (a : Type) -> Type where
-  MkTMVar1 :  (ref : Ref s (Maybe a))
-           -> (waiters : Ref s (Queue (Waiter1 s a)))
-           -> TMVar1 s a
+data Waiter : (a : Type) -> Type where
+  MkWaiter :  (id   : Nat)
+           -> (wake : Channel (Maybe a))
+           -> Waiter a
 
 ||| An existing resource currently sitting in a pool.
 public export
@@ -114,23 +72,78 @@ data Entry : (a : Type) -> Type where
           -> (lastused : IClock CLOCK_MONOTONIC)
           -> Entry a
 
-||| Stripe of a resource pool based on liner mutable queues.
-||| If available is 0, the list of threads
-||| waiting for a resource (each with an associated channel)
-||| is queue ++ reverse queuer.
+||| Stripe is the only concurrent state machine in the system.
+|||
+||| It owns:
+||| - Resource availability.
+||| - Cached resources.
+||| - All waiting threads.
+||| - Cancellation tracking.
+|||
+||| All mutations occur via CAS on an enclosing Ref, `Stripe1 s a`.
+|||
+||| Fields:
+||| - `available` : number of available resources
+||| - `cache`     : reusable resources
+||| - `queue`     : primary FIFO of waiters
+||| - `queuer`    : secondary FIFO (amortized append)
+||| - `nextId`    : fresh waiter id supply
+||| - `cancelled` : list of cancelled waiter ids
+|||
+||| Invariants:
+||| - Stripe is immutable between CAS updates.
+||| - Queue ordering is authoritative.
+||| - Cancelled waiters are lazily skipped.
+|||
 public export
-data Stripe : (s : Type) -> (a : Type) -> Type where
+data Stripe : (a : Type) -> Type where
   MkStripe :  (available : Nat)
            -> (cache : List (Entry a))
-           -> (queue : Queue (Waiter1 s a))
-           -> (queuer : Queue (Waiter1 s a))
-           -> Stripe s a
+           -> (queue : Queue (Waiter a))
+           -> (queuer : Queue (Waiter a))
+           -> (nextid : Nat)
+           -> (cancelled : Queue Nat)
+           -> Stripe a
 
 ||| A linear mutable stripe.
 public export
 data Stripe1 : (s : Type) -> (a : Type) -> Type where
-  MkStripe1 :  Ref s (Stripe s a)
+  MkStripe1 :  Ref s (Stripe a)
             -> Stripe1 s a
+
+||| Effects emitted by a Stripe transition.
+|||
+||| These are collected during CAS computation and executed
+||| only after a successful CAS commit.
+|||
+||| Guarantees:
+||| - No IO inside CAS.
+||| - No duplicated effects on retry.
+||| - Deterministic state transitions.
+|||
+public export
+data StripeEffect a
+  = Wake (Channel (Maybe a)) (Maybe a)
+  | WakeMany (List (Channel (Maybe a), Maybe a))
+  | InsertWithTimestamp a
+  | FreeMany (a -> IO ()) (List a)
+  | None
+
+||| Result of a Stripe state transition.
+|||
+||| Represents:
+||| - The new Stripe state (to be CAS'd).
+||| - Effects to run AFTER successful commit.
+|||
+||| Invariants:
+||| - This must be treated as a one-shot value.
+||| - If CAS fails, this MUST be discarded.
+||| - Effects must NEVER be run unless CAS succeeds.
+public export
+record StripeStep a where
+  constructor MkStripeStep
+  stripe  : Stripe a
+  effects : List (StripeEffect a)
 
 ||| A single, local pool based on a linear mutable stripe.
 public export
