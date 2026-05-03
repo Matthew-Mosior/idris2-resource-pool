@@ -323,30 +323,6 @@ signal stripe@(MkStripe available cache queue queuer nextid cancelled) val =
            MkStripeStep (MkStripe available' cache' queue' queuer' nextid' cancelled')
                         [Wake wake (Just val')]
 
-private
-takeStep :  Stripe a
-         -> IO (StripeStep a, Either a (Nat, Channel (Maybe a)))
-takeStep (MkStripe available cache queue queuer nextid cancelled) =
-  case cache of
-    -- Slow path, enqueue waiter
-    []                    => do
-      wake        <- makeChannel
-      let wid     = nextid
-          waiter  = MkWaiter wid wake
-          stripe' = MkStripe available cache queue (appendQ queuer waiter) (S nextid) cancelled
-      pure (MkStripeStep stripe' [None], Right (wid, wake))
-    -- Fast path, consume cached resource
-    (MkEntry v _ :: rest) =>
-      let stripe' = MkStripe (minus available 1) rest queue queuer nextid cancelled
-        in pure (MkStripeStep stripe' [None], Left v)
-
-private
-putStep :  Stripe a
-        -> a
-        -> StripeStep a
-putStep st v =
-  signal st (Just v)
-
 ||| Block until a resource is delivered to this waiter.
 |||
 ||| Behavior:
