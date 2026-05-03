@@ -549,7 +549,8 @@ takeResource pool@(MkPool1 poolconfig localpools _) t =
   let lp@(MkLocalPool1 _ stripe1@(MkStripe1 striperef) _) # t := getLocalPool localpools t
       -- Pre-allocate channel for slow path
       wake                                                # t := ioToF1 makeChannel t
-      (effects, result)                                   # t :=
+      res                                                     : (List (StripeEffect a), Either a (Nat, Channel (Maybe a)))
+      res                                                 # t :=
         casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled) =>
                                 case cache of
                                   -- fast path
@@ -562,14 +563,17 @@ takeResource pool@(MkPool1 poolconfig localpools _) t =
                                                            queuer
                                                            nextid
                                                            cancelled
+                                        result : Either a (Nat, Channel (Maybe a))
+                                        result = Left v
                                       in ( stripe'
-                                         , (none, Left v)
+                                         , (none, result)
                                          )
                                   -- slow path
                                   []                  =>
                                     let none : List (StripeEffect a)
                                         none    = [None]
                                         wid     = nextid
+                                        waiter : Waiter a
                                         waiter  = MkWaiter wid wake
                                         stripe' = MkStripe available
                                                            cache
@@ -577,13 +581,15 @@ takeResource pool@(MkPool1 poolconfig localpools _) t =
                                                            (appendQ queuer waiter)
                                                            (S nextid)
                                                            cancelled
+                                        result : Either a (Nat, Channel (Maybe a))
+                                        result = Right (wid, wake)
                                       in ( stripe'
-                                         , (none, Right (wid, wake))
+                                         , (none, result)
                                          )
                              ) t
       -- Run effects after commit
-      ()                                                  # t := runEffects stripe1 effects t
-    in case result of
+      ()                                                  # t := runEffects stripe1 (Builtin.fst res) t
+    in case Builtin.snd res of
          -- fast path
          Left v =>
            (v, lp) # t
