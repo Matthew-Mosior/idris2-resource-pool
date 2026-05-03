@@ -699,25 +699,67 @@ takeResource pool@(MkPool1 poolconfig localpools _) t =
     createWithCleanup (MkPoolConfig createResource _ _ _ _ _) stripe =
       onAbort (liftIO createResource) (runIO (restoreSize stripe))
 
-{-
+||| Safely acquire and use a resource from the pool.
+|||
+||| This is the primary high-level interface for working with `Pool1`.
+||| It ensures that resources are correctly returned or destroyed,
+||| even in the presence of exceptions or cancellation.
+|||
+||| Behavior:
+||| - Acquires a resource using `takeResource`.
+||| - Executes the user action `f` with that resource.
+||| - On normal completion:
+|||  - The resource is returned to the pool via `putResource`.
+||| - On exception or cancellation:
+|||  - The resource is destroyed via `destroyResource`.
+|||
+||| Concurrency & Masking:
+||| - The entire operation runs inside `uncancelable`, ensuring:
+|||  - Resource acquisition and release cannot be interrupted.
+||| - The user action `f` is executed via `poll`, meaning:
+|||  - It *can* be interrupted or cancelled.
+||| - If cancellation occurs during `f`, the cleanup handler runs.
+|||
+||| Cleanup Guarantees:
+||| - Exactly one of the following happens:
+|||  - `putResource` (success path)
+|||  - `destroyResource` (failure or cancellation path)
+||| - No resource is leaked or returned twice.
+||| - Waiters are properly woken via Stripe effects.
+|||
+||| Failure Handling:
+||| - Exceptions from `f` are propagated.
+||| - Exceptions during acquisition or cleanup cause a crash (consistent with the rest of the module’s error handling).
+|||
+||| Returns:
+||| - The result of applying `f` to the acquired resource.
+|||
+||| Invariants:
+||| - Resources are never duplicated or lost.
+||| - Pool state remains consistent under concurrency.
+||| - All Stripe effects are executed after CAS commit.
+|||
 export
-withResource :  Pool1 World a
+withResource :  {n : Nat}
+             -> Pool1 World n a
              -> (a -> IO r)
              -> F1 World r
-withResource pool t =
-  let (res, localpool) # t := takeResource pool t
-      res'             # t := ioToF1 (runElinIO (waitForResource' mstripe wid wake)) t
-    in case res' of
-         Right res'' =>
+withResource pool f t =
+  let res # t := ioToF1 (runElinIO (withResource' pool f)) t
+    in case res of
+         Right res' =>
            res' # t
          Left err    =>
            (assert_total $ idris_crash "Data.Pool.withResource: \{show err}") # t
   where
-    withResource' :  MCancel (Elin World)
-                  => Stripe1 World a
-                  -> Nat
-                  -> Channel (Maybe a)
-                  -> Elin World [Errno] (Maybe a)
-    withResource' mstripe wid wake =
-      onAbort (runIO (waitForResource'' wake)) (runIO (cleanup mstripe wid))
--}
+    withResource' :  {n : Nat}
+                  -> MCancel (Elin World)
+                  => Pool1 World n a
+                  -> (a -> IO r)
+                  -> Elin World [Errno] r
+    withResource' pool f =
+      uncancelable $ \poll => do
+        (res, MkLocalPool1 _ (MkStripe1 striperef) _) <- runIO (takeResource pool)
+        res' <- onAbort (poll $ liftIO $ f res) (runIO (destroyResource (MkStripe1 striperef)))
+        runIO (putResource (MkStripe1 striperef) res)
+        pure res'
