@@ -548,41 +548,39 @@ takeResource :  Pool1 World a
 takeResource pool@(MkPool1 poolconfig localpools _) t =
   let lp@(MkLocalPool1 _ stripe1@(MkStripe1 striperef) _) # t := getLocalPool localpools t
       -- Pre-allocate channel for slow path
-      wake              # t := ioToF1 makeChannel t
-      (effects, result) # t := casupdate1 striperef (\stripe =>
-                                                      case stripe of
-                                                        MkStripe available cache queue queuer nextid cancelled =>
-                                                          case cache of
-                                                            -- fast path
-                                                            MkEntry v _ :: rest =>
-                                                              let none : List (StripeEffect a)
-                                                                  none    = [None]
-                                                                  stripe' =
-                                                                    MkStripe (minus available 1)
-                                                                              rest
-                                                                              queue
-                                                                              queuer
-                                                                              nextid
-                                                                              cancelled
-                                                                in ( stripe'
-                                                                   , (none, Left v)
-                                                                   )
-                                                            -- slow path
-                                                            []                  =>
-                                                              let none : List (StripeEffect a)
-                                                                  none    = [None]
-                                                                  wid     = nextid
-                                                                  waiter  = MkWaiter wid wake
-                                                                  stripe' = MkStripe available
-                                                                                     cache
-                                                                                     queue
-                                                                                     (appendQ queuer waiter)
-                                                                                     (S nextid)
-                                                                                     cancelled
-                                                                in ( stripe'
-                                                                   , (none, Right (wid, wake))
-                                                                   )
-                                                    ) t
+      wake                                                # t := ioToF1 makeChannel t
+      (effects, result)                                   # t :=
+        casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled) =>
+                                case cache of
+                                  -- fast path
+                                  MkEntry v _ :: rest =>
+                                    let none : List (StripeEffect a)
+                                        none    = [None]
+                                        stripe' = MkStripe (minus available 1)
+                                                           rest
+                                                           queue
+                                                           queuer
+                                                           nextid
+                                                           cancelled
+                                      in ( stripe'
+                                         , (none, Left v)
+                                         )
+                                  -- slow path
+                                  []                  =>
+                                    let none : List (StripeEffect a)
+                                        none    = [None]
+                                        wid     = nextid
+                                        waiter  = MkWaiter wid wake
+                                        stripe' = MkStripe available
+                                                           cache
+                                                           queue
+                                                           (appendQ queuer waiter)
+                                                           (S nextid)
+                                                           cancelled
+                                      in ( stripe'
+                                         , (none, Right (wid, wake))
+                                         )
+                             ) t
       -- Run effects after commit
       ()                # t := runEffects stripe1 effects t
     in case result of
