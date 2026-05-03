@@ -297,7 +297,7 @@ getLocalPool pools t =
 ||| Invariants:
 ||| - Each wake corresponds to a committed state transition.
 ||| - Queue ordering is preserved.
-||| - Mo side effects occur during evaluation.
+||| - No side effects occur during evaluation.
 |||
 export
 signal :  Stripe a
