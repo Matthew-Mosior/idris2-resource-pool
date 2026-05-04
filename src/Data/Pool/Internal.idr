@@ -16,7 +16,6 @@ import System.Posix.Timer.Prim
 ||| Configuration of a Pool.
 |||
 ||| Constraints:
-||| - poolcachettl -> The smallest acceptable value is 0.5.
 ||| - poolmaxresources -> The smallest acceptable value is 1.
 ||| - poolnumstripes -> The smallest acceptable value is 1, poolnumstripes must not be larger than poolmaxresources.
 |||
@@ -66,6 +65,7 @@ data Waiter : (a : Type) -> Type where
            -> Waiter a
 
 ||| An existing resource currently sitting in a pool.
+|||
 public export
 data Entry : (a : Type) -> Type where
   MkEntry :  (entry : a)
@@ -106,6 +106,7 @@ data Stripe : (a : Type) -> Type where
            -> Stripe a
 
 ||| A linear mutable stripe.
+|||
 public export
 data Stripe1 : (s : Type) -> (a : Type) -> Type where
   MkStripe1 :  Ref s (Stripe a)
@@ -139,6 +140,7 @@ data StripeEffect a
 ||| - This must be treated as a one-shot value.
 ||| - If CAS fails, this MUST be discarded.
 ||| - Effects must NEVER be run unless CAS succeeds.
+|||
 public export
 record StripeStep a where
   constructor MkStripeStep
@@ -146,6 +148,7 @@ record StripeStep a where
   effects : List (StripeEffect a)
 
 ||| A single, local pool based on a linear mutable stripe.
+|||
 public export
 data LocalPool1 : (s : Type) -> (a : Type) -> Type where
   MkLocalPool1 :  (stripeid : Nat)
@@ -154,6 +157,7 @@ data LocalPool1 : (s : Type) -> (a : Type) -> Type where
                -> LocalPool1 s a
 
 ||| Striped resource pool based on linear mutable references.
+|||
 public export
 data Pool1 : (s : Type) -> (n : Nat) -> (a : Type) -> Type where
   MkPool1 :  (poolconfig : PoolConfig a)
