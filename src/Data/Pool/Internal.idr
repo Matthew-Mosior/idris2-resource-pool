@@ -19,14 +19,15 @@ import System.Posix.Timer.Prim
 ||| - poolcachettl -> The smallest acceptable value is 0.5.
 ||| - poolmaxresources -> The smallest acceptable value is 1.
 ||| - poolnumstripes -> The smallest acceptable value is 1, poolnumstripes must not be larger than poolmaxresources.
+|||
 public export
 record PoolConfig a where
   constructor MkPoolConfig
   createresource   : IO a
   freeresource     : a -> IO ()
-  poolcachettl     : (ttl : Double) -> {auto prf : So (0.5 <= ttl)} -> Double
+  poolcachettl     : Clock Duration
   poolmaxresources : (maxres ** LTE 1 maxres)
-  poolnumstripes   : Maybe (n ** (LTE 1 n, LTE n (fst poolmaxresources)))
+  poolnumstripes   : (n ** (LTE 1 n, LTE n (fst poolmaxresources)))
   poolconfiglabel  : String
 
 ||| A simple (persistent) FIFO queue.
@@ -36,10 +37,9 @@ record PoolConfig a where
 |||
 ||| Notes:
 ||| - This representation has O(n) append.
-||| - Under contention (with CAS updates), appends may be retried,
-|||   so this structure favors simplicity over performance.
-||| - It is typically used together with a secondary "reversed"
-|||   queue to amortize costs (two-list queue pattern).
+||| - Under contention (with CAS updates), appends may be retried, so this structure favors simplicity over performance.
+||| - It is typically used together with a secondary "reversed" queue to amortize costs (two-list queue pattern).
+|||
 public export
 data Queue a
   = QNode a (Queue a)
@@ -158,5 +158,4 @@ public export
 data Pool1 : (s : Type) -> (n : Nat) -> (a : Type) -> Type where
   MkPool1 :  (poolconfig : PoolConfig a)
           -> (localpools : (MArray s n (LocalPool1 s a)))
-          -> (reaperref : IORef ())
           -> Pool1 s n a

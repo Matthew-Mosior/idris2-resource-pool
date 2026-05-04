@@ -104,6 +104,14 @@ dequeueStripe (MkStripe available cache queue queuer nextid cancelled) =
          Just w  =>
            (Just w, MkStripe available cache rest QEnd nextid cancelled)
 
+||| Check to see if entry is stale.
+isStale :  Clock Duration
+        -> IClock CLOCK_MONOTONIC
+        -> Entry a
+        -> Bool
+isStale ttl now (MkEntry _ lastused) =
+  timeDifference now lastused > ttl
+
 ||| Execute `Stripe a` effects after CAS commit.
 |||
 ||| This is the only place IO is performed for Stripe transitions.
@@ -182,34 +190,10 @@ casWithEffects (MkStripe1 striperef) stepfn t =
 --          Configuration
 --------------------------------------------------------------------------------
 
-||| Create a `PoolConfig a` with optional parameters having default values.
-export
-defaultPoolConfig :  IO a                     -- The action that creates a new resource.
-                  -> (a -> IO ())             -- The action that destroys an existing resource.
-                  -> Double                   -- Cache TTL (≥ 0.5).
-                                              -- Note: The elapsed time before destroying a resource may be a little
-                                              -- longer than requested, as the collector thread wakes at 1-second intervals.
-                  -> (maxres ** LTE 1 maxres) -- The maximum number of resources to keep open across all stripes (≥ 1).
-                                              -- Note: For each stripe, the number of resources is divided by the number of
-                                              -- stripes and rounded up, hence the pool might end up creating up to N - 1
-                                              -- resources more in total than specified, where N is the number of stripes.
-                  -> PoolConfig a
-defaultPoolConfig create free cachettl maxresources =
-  MkPoolConfig create
-               free
-               (\cachettl => cachettl)
-               maxresources
-               Nothing
-               ""
-
 ||| Set the number of stripes in the `PoolConfig a`.
-||| If set to Nothing (the default value), the pool will create the amount of
-||| stripes equal to the number of capabilities. This ensures that threads never
-||| compete over access to the same stripe and results in a very good performance
-||| in a multi-threaded environment.
 export
 setNumStripes :  (pc : PoolConfig a)
-              -> Maybe (n ** (LTE 1 n, LTE n (fst (poolmaxresources pc))))
+              -> (n ** (LTE 1 n, LTE n (fst (poolmaxresources pc))))
               -> PoolConfig a
 setNumStripes (MkPoolConfig create free cachettl (maxres ** prfmaxres) _ pclabel) numstripes =
   MkPoolConfig create
@@ -231,7 +215,192 @@ setPoolLabel label pc =
 --          Resource Management
 --------------------------------------------------------------------------------
 
-||| Get a `LocalPool World a`.
+||| Create a new striped resource pool.
+|||
+||| Behavior:
+||| - Allocates exactly `mstripes` independent `Stripe`s.
+||| - Distributes the total capacity (`poolmaxresources`) across stripes as evenly as possible:
+|||  - Each stripe receives either `base` or `base + 1` capacity.
+|||  - The first `rest` stripes receive the extra unit.
+||| - Initializes each stripe with:
+|||  - `available = assigned capacity`
+|||  - empty cache
+|||  - empty waiter queues
+|||  - fresh waiter id supply
+||| - Constructs a `LocalPool1` for each stripe and stores them in a mutable array.
+|||
+||| Resource Distribution:
+||| - Let:
+|||  - `base = div maxres mstripes`
+|||  - `rest = mod maxres mstripes`
+||| - Then:
+|||  - Total capacity is preserved: sum(stripes) = maxres
+|||  - Load is balanced with minimal skew (difference ≤ 1).
+|||
+||| Concurrency Model:
+||| - Each stripe is independent and owns its own:
+|||   - resource cache
+|||   - waiter queues
+|||   - capacity accounting
+||| - Threads interact with exactly one stripe at a time (via `getLocalPool`).
+||| - This minimizes contention and improves scalability.
+|||
+||| Cleanup Model:
+||| - No global collector thread is created.
+||| - Resource cleanup is performed opportunistically via `cleanStripeIfNeeded`.
+||| - This ensures:
+|||   - No background threads.
+|||   - Cleanup proportional to usage.
+|||   - Deterministic behavior (no GC reliance).
+|||
+||| Guarantees:
+||| - Total capacity never exceeds `poolmaxresources`.
+||| - Each stripe starts empty but with full creation capacity.
+||| - No IO occurs during stripe initialization except allocation of refs.
+||| - Array is fully initialized before being returned.
+|||
+||| Failure Conditions:
+||| - Crashes if:
+|||   - An impossible index is encountered during initialization (should be unreachable).
+|||   - A `Nat -> Fin` conversion fails (indicates internal inconsistency).
+|||
+||| Notes:
+||| - `numstripes` is explicit, avoiding runtime dependency on capabilities.
+||| - The caller is responsible for eventual cleanup via `destroyAllResources`.
+||| - This function performs no resource creation; resources are created lazily on demand.
+|||
+||| Invariants Established:
+||| - Each `LocalPool1` corresponds to exactly one stripe.
+||| - Stripe state is valid and consistent for CAS-based transitions.
+||| - Waiter queues and cancellation queues start empty.
+|||
+export
+newPool :  (numstripes : Nat)
+        -> PoolConfig a
+        -> F1 World (Pool1 World numstripes a)
+newPool numstripes pc@(MkPoolConfig create free cachettl (maxres ** prfmaxres) _ pclabel) t =
+  let striperesources     := let base = div maxres numstripes
+                                 rest = mod maxres numstripes
+                               in zip (range Z numstripes)
+                                      (distribute base rest numstripes)
+      pools           # t := unsafeMArray1 numstripes t
+      ()              # t := saturateLocalPools 0 numstripes striperesources pools t
+    in MkPool1 pc pools # t 
+  where
+    range :  Nat
+          -> Nat
+          -> List Nat
+    range start Z     =
+      []
+    range start (S k) =
+      start :: range (S start) k
+    distribute :  Nat
+               -> Nat
+               -> Nat
+               -> List Nat
+    distribute base rest Z      =
+      []
+    distribute base Z     (S k) =
+      base :: distribute base Z k
+    distribute base (S r) (S k) =
+      (S base) :: distribute base r k
+    saturateLocalPools :  (o, x : Nat)
+                       -> {auto v : Ix x numstripes}
+                       -> {auto 0 prf : LTE o $ ixToNat v}
+                       -> (resources : List (Nat, Nat))
+                       -> (arr : MArray World numstripes (LocalPool1 World a))
+                       -> F1' World
+    saturateLocalPools o Z     _         _   t =
+      () # t
+    saturateLocalPools o (S j) resources arr t =
+      case lookup j resources of
+        Nothing       =>
+          (assert_total $ idris_crash "Data.Pool.newPool: impossible index") # t
+        Just resource =>
+          let striperef  # t := ref1 ( MkStripe resource
+                                                []
+                                                QEnd
+                                                QEnd
+                                                0
+                                                QEnd          
+                                     ) t
+              striperef1     := MkStripe1 striperef
+              cleanerref # t := ref1 () t
+              localpool      := MkLocalPool1 j striperef1 cleanerref
+            in case tryNatToFin j of
+                 Nothing =>
+                   (assert_total $ idris_crash "Data.Pool.newPool.saturatePools: couldn't convert Nat to Fin") # t
+                 Just j' =>
+                   let () # t := set arr j' localpool t
+                     in saturateLocalPools o j resources arr t
+
+||| Select a `LocalPool1 World a` for the current thread.
+|||
+||| This function deterministically maps the calling thread to one of the
+||| available stripes using a modulo-based hashing scheme.
+|||
+||| Behavior:
+||| - Computes a stripe index `sid`:
+|||  - If `n == 1`, always selects index `0` (fast path).
+|||  - Otherwise:
+|||   - Retrieves the current thread id (`getThreadId`).
+|||   - Maps it into `[0, n)` via modulo arithmetic.
+||| - Converts the resulting index into a `Fin n`.
+||| - Returns the corresponding `LocalPool1` from the array.
+|||
+||| Thread-to-Stripe Mapping:
+||| - Mapping is stable for a given thread id.
+||| - Different threads are distributed across stripes.
+||| - Collisions are possible but minimized under uniform thread ids.
+|||
+||| Concurrency Implications:
+||| - Each thread interacts primarily with a single stripe.
+||| - Reduces contention compared to a single global pool.
+||| - Enables scalable parallel access under CAS-based updates.
+|||
+||| Arithmetic Details:
+||| - Uses a custom `remInt` implementation to ensure:
+|||  - Correct behavior for negative thread ids (if any).
+|||  - Avoidance of undefined behavior from division/modulo edge cases.
+||| - Conversion pipeline:
+|||  - Int (thread id)
+|||   - modulo n
+|||   - Nat
+|||   - Fin n
+|||
+||| Guarantees:
+||| - Always returns a valid `LocalPool1` when invariants hold.
+||| - No mutation of pool state occurs.
+||| - No blocking or waiting.
+|||
+||| Failure Conditions:
+||| - Crashes if:
+|||   - Conversion from `Nat` to `Fin n` fails (should be impossible if modulo is correct).
+|||   - Division by zero is attempted (guarded by invariant `n >= 1`).
+|||
+||| Performance:
+||| - O(1) selection.
+||| - Minimal overhead in the `n == 1` case (no IO, no modulo).
+||| - Single IO call (`getThreadId`) in the general case.
+|||
+||| Design Notes:
+||| - This function is intentionally simple and deterministic.
+||| - It avoids randomness or hashing to keep behavior predictable.
+||| - Stripe selection is orthogonal to resource availability:
+|||  - Load balancing is achieved probabilistically via thread distribution.
+|||
+||| Invariants:
+||| - `n >= 1` (guaranteed by `PoolConfig` construction).
+||| - `pools` contains exactly `n` initialized entries.
+||| - Each index in `[0, n)` maps to a valid `LocalPool1`.
+|||
+||| Relationship to the system:
+||| - This is the entry point for all pool operations:
+|||  - `takeResource`
+|||  - `tryTakeResource`
+|||  - `putResource`
+||| - It determines which stripe's CAS state machine is used.
+|||
 private
 getLocalPool :  {n : Nat}
              -> MArray World n (LocalPool1 World a)
@@ -420,23 +589,6 @@ destroyResource (MkStripe1 striperef) t =
       uncancelable $ \_ =>
         runIO (destroy' (MkStripe1 striperef))
 
-||| Return a resource to the `Pool1 World a`.
-|||
-||| Behavior:
-||| - If a waiter exists, the resource is delivered directly.
-||| - Otherwise, it is inserted into the cache with a timestamp.
-|||
-||| Guarantees:
-||| - No resource is lost.
-||| - Wakeups are ordered and deterministic.
-|||
-export
-putResource :  Stripe1 World a
-            -> a
-            -> F1' World
-putResource (MkStripe1 striperef) val t =
-  casWithEffects (MkStripe1 striperef) (\stripe => signal stripe (Just val)) t
-
 ||| Free resource entries in the stripe that satisfy a predicate.
 |||
 ||| Behavior:
@@ -486,7 +638,105 @@ cleanStripe isstale free (MkStripe1 striperef) t =
       uncancelable $ \_ =>
         runIO (cleanStripe'' (MkStripe1 striperef))
 
-||| Destroy all resources in all stripes in the `Pool1 World a`.
+||| Opportunistically clean stale resources from a `Stripe1 World a`.
+|||
+||| This function performs stripe-local garbage collection of cached resources
+||| based on a time-to-live (TTL) policy. It replaces the need for a global
+||| collector thread by tying cleanup to normal pool activity.
+|||
+||| Behavior:
+||| - Reads the current monotonic time.
+||| - Constructs a staleness predicate using the provided TTL.
+||| - Invokes `cleanStripe` to:
+|||   - Remove stale entries from the cache.
+|||   - Emit `FreeMany` effects for the removed resources.
+||| - Effects are executed only after the CAS commit inside `cleanStripe`.
+|||
+||| Staleness:
+||| - A resource is considered stale if:
+|||  - now - lastUsed > ttl
+||| - Time is measured using `CLOCK_MONOTONIC`, ensuring:
+|||  - No sensitivity to wall-clock changes.
+|||  - Stable elapsed-time semantics.
+|||
+||| Concurrency Model:
+||| - Cleanup is performed via `cleanStripe`, which uses CAS:
+|||  - Stripe state updates are atomic.
+|||  - Effects are executed exactly once after commit.
+||| - Safe under contention:
+|||  - Multiple threads may attempt cleanup concurrently.
+|||  - Only one successful CAS applies each transition.
+|||  - No resource is freed more than once.
+|||
+||| Execution Model:
+||| - This function performs IO (time retrieval) outside CAS.
+||| - The actual mutation and freeing are deferred via `StripeEffect`.
+||| - No IO occurs during CAS evaluation.
+|||
+||| Usage:
+||| - Intended to be called opportunistically during:
+|||  - `takeResource`
+|||  - `putResource`
+|||  - `tryTakeResource`
+||| - Provides amortized cleanup without background threads.
+|||
+||| Guarantees:
+||| - Stale resources are eventually freed under continued usage.
+||| - No interference with active resources or waiters.
+||| - No blocking or waiting is introduced.
+|||
+||| Tradeoffs:
+||| - Cleanup is activity-driven rather than time-driven.
+||| - Idle stripes may retain stale resources longer.
+||| - In exchange:
+|||  - No global thread.
+|||  - Lower runtime overhead.
+|||  - Fully local behavior.
+|||
+||| Failure Handling:
+||| - Crashes if time retrieval fails (consistent with module error policy).
+|||
+||| Invariants:
+||| - Only cached resources are considered for cleanup.
+||| - Each freed resource is removed exactly once.
+||| - Stripe structure remains consistent after cleanup.
+|||
+private
+cleanStripeIfNeeded :  (ttl : Clock Duration)
+                    -> (free : a -> IO ())
+                    -> Stripe1 World a
+                    -> F1' World
+cleanStripeIfNeeded ttl free (MkStripe1 striperef) t =
+  let now # t := ioToF1 (runElinIO grabTime) t
+    in case now of
+         Left err   =>
+           (assert_total $ idris_crash "Data.Pool.cleanStripeIfNeeded: \{show err}") # t
+         Right now' =>
+           cleanStripe (isStale ttl now') free (MkStripe1 striperef) t
+  where    
+    grabTime : Elin World [Errno] (IClock CLOCK_MONOTONIC)
+    grabTime = getTime CLOCK_MONOTONIC
+
+||| Return a resource to the `Pool1 World n a`.
+|||
+||| Behavior:
+||| - If a waiter exists, the resource is delivered directly.
+||| - Otherwise, it is inserted into the cache with a timestamp.
+|||
+||| Guarantees:
+||| - No resource is lost.
+||| - Wakeups are ordered and deterministic.
+|||
+export
+putResource :  Pool1 World n a
+            -> Stripe1 World a
+            -> a
+            -> F1' World
+putResource (MkPool1 (MkPoolConfig _ free ttl _ _ _) _) (MkStripe1 striperef) val t =
+  let () # t := cleanStripeIfNeeded ttl free (MkStripe1 striperef) t
+    in casWithEffects (MkStripe1 striperef) (\stripe => signal stripe (Just val)) t
+
+||| Destroy all resources in all stripes in the `Pool1 World n a`.
 |||
 ||| Behavior:
 ||| - Removes all cached resources from every stripe.
@@ -507,7 +757,7 @@ destroyAllResources :  {n : Nat}
                     -> Pool1 World n a
                     -> MArray World n (LocalPool1 World a)
                     -> F1' World
-destroyAllResources (MkPool1 (MkPoolConfig _ freeresource _ _ _ _) _ _) localpools t =
+destroyAllResources (MkPool1 (MkPoolConfig _ freeresource _ _ _ _) _) localpools t =
   go 0 n localpools t
   where
     go :  (o, x : Nat)
@@ -549,7 +799,7 @@ restoreSize (MkStripe1 striperef) t =
         (MkStripe (S available) cache queue queuer nextid cancelled)
         [None]
 
-||| Acquire a resource from the `Pool1 World a`.
+||| Acquire a resource from the `Pool1 World n a`.
 |||
 ||| Behavior:
 ||| - Attempts to take a resource from the local stripe.
@@ -605,9 +855,11 @@ export
 takeResource :  {n : Nat}
              -> Pool1 World n a
              -> F1 World (a, LocalPool1 World a)
-takeResource pool@(MkPool1 poolconfig localpools _) t =
+takeResource pool@(MkPool1 poolconfig@(MkPoolConfig _ free ttl _ _ _) localpools) t =
   let lp@(MkLocalPool1 _ stripe1@(MkStripe1 striperef) _) # t := getLocalPool localpools t
-      -- Pre-allocate channel for slow path
+      -- clean stripe if needed
+      ()                                                  # t := cleanStripeIfNeeded ttl free (MkStripe1 striperef) t
+      -- pre-allocate channel for slow path
       wake                                                # t := ioToF1 makeChannel t
       res                                                     : (List (StripeEffect a), Either a (Nat, Channel (Maybe a)))
       res                                                 # t :=
@@ -737,7 +989,7 @@ withResource pool f t =
       uncancelable $ \poll => do
         (res, MkLocalPool1 _ (MkStripe1 striperef) _) <- runIO (takeResource pool)
         res' <- onAbort (poll $ liftIO $ f res) (runIO (destroyResource (MkStripe1 striperef)))
-        runIO (putResource (MkStripe1 striperef) res)
+        runIO (putResource pool (MkStripe1 striperef) res)
         pure res'
 
 ||| Attempt to take a resource without blocking.
@@ -763,7 +1015,7 @@ export
 tryTakeResource :  {n : Nat}
                 -> Pool1 World n a
                 -> F1 World (Maybe (a, LocalPool1 World a))
-tryTakeResource pool@(MkPool1 _ localpools _) t =
+tryTakeResource pool@(MkPool1 _ localpools) t =
   let res # t := ioToF1 (runElinIO (tryTakeResource' pool)) t
     in case res of
          Right res'  =>
@@ -775,8 +1027,10 @@ tryTakeResource pool@(MkPool1 _ localpools _) t =
                       -> MCancel (Elin World)
                       => Pool1 World n a
                       -> F1 World (Maybe (a, LocalPool1 World a))
-    tryTakeResource'' pool t =
+    tryTakeResource'' pool@(MkPool1 (MkPoolConfig _ free ttl _ _ _) _) t =
       let lp@(MkLocalPool1 _ stripe1@(MkStripe1 striperef) _) # t := getLocalPool localpools t
+          -- clean stripe if needed
+          ()                                                  # t := cleanStripeIfNeeded ttl free (MkStripe1 striperef) t
           -- attempt fast-path only
           res                                                 # t :=
             casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled) =>
@@ -885,5 +1139,5 @@ tryWithResource pool f t =
             pure Nothing
           Just (res', MkLocalPool1 _ (MkStripe1 striperef) _) => do
             res'' <- onAbort (poll $ liftIO $ f res') (runIO (destroyResource (MkStripe1 striperef)))
-            runIO (putResource (MkStripe1 striperef) res')
+            runIO (putResource pool (MkStripe1 striperef) res')
             pure $ Just res''
