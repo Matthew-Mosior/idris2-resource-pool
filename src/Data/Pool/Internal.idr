@@ -5,6 +5,7 @@ import Data.Array.Core
 import Data.Linear.Ref1
 import Data.Nat
 import Data.So
+import Data.SortedSet
 import System.Concurrency
 import System.Posix.Timer
 import System.Posix.Timer.Prim
@@ -102,7 +103,7 @@ data Stripe : (a : Type) -> Type where
            -> (queue : Queue (Waiter a))
            -> (queuer : Queue (Waiter a))
            -> (nextid : Nat)
-           -> (cancelled : Queue Nat)
+           -> (cancelled : SortedSet Nat)
            -> Stripe a
 
 ||| A linear mutable stripe.

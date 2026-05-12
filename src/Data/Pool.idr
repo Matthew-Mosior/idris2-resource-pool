@@ -11,6 +11,7 @@ import Data.Hashable
 import Data.Linear.Ref1
 import Data.Linear.Traverse1
 import Data.List
+import Data.SortedSet
 import System.Concurrency
 import System.Info
 import System.Posix.Timer
@@ -81,12 +82,12 @@ normalize q1   q2 =
 
 ||| Dequeue first live waiter.
 dequeueLive :  Queue (Waiter a)
-            -> Queue Nat
+            -> SortedSet Nat
             -> (Maybe (Waiter a), Queue (Waiter a))
 dequeueLive QEnd                              cancelled =
   (Nothing, QEnd)
 dequeueLive (QNode w@(MkWaiter id wake) rest) cancelled =
-  case isCancelled id cancelled of
+  case contains id cancelled of
     True  =>
       dequeueLive rest cancelled
     False =>
@@ -322,7 +323,7 @@ newPool numstripes pc@(MkPoolConfig create free cachettl (maxres ** prfmaxres) _
                                                 QEnd
                                                 QEnd
                                                 0
-                                                QEnd          
+                                                empty
                                      ) t
               striperef1     := MkStripe1 striperef
               cleanerref # t := ref1 () t
@@ -543,7 +544,7 @@ waitForResource mstripe wid wake t =
              -> F1' World
     cleanup (MkStripe1 mstripe) wid t =
       casupdate1 mstripe (\(MkStripe available cache queue queuer nextid cancelled) =>
-                           (MkStripe available cache queue queuer nextid (appendQ cancelled wid), ())
+                           (MkStripe available cache queue queuer nextid (insert wid cancelled), ())
                          ) t
     waitForResource'' :  Channel (Maybe a)
                       -> F1 World (Maybe a)
