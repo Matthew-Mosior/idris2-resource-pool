@@ -803,53 +803,53 @@ restoreSize (MkStripe1 striperef) t =
 |||
 ||| Behavior:
 ||| - Attempts to take a resource from the local stripe.
-||| - Uses a single CAS step to decide between:
-|||  - Fast path: consume a cached resource immediately.
-|||  - Slow path: enqueue the current thread as a waiter.
+||| - Uses a single CAS step to atomically choose between:
+|||  - Reusing a cached resource.
+|||  - Reserving capacity for new resource creation.
+|||  - Enqueuing as a waiter when fully exhausted.
 |||
-||| Fast Path:
-||| - If a cached resource is available:
-|||  - It is removed from the cache.
-|||  - The stripe’s available count is decremented.
-|||  - The resource is returned immediately.
+||| Fast Path (Cache Reuse):
+||| - If a cached resource exists:
+|||  - Remove it from the cache.
+|||  - Return it immediately.
+||| - `available` is not modified.
+||| - The resource already exists and therefore does not consume creation capacity.
 |||
-||| Slow Path:
-||| - If no cached resource is available:
-|||  - A `Waiter` is registered with a wake channel.
-|||  - The thread blocks via `waitForResource`.
-|||  - When woken:
-|||   - `Just a`, a resource was delivered, return it.
-|||   - `Nothing`, no resource available, proceed to creation.
+||| Creation Path:
+||| - If the cache is empty but `available > 0`:
+|||  - Atomically decrement `available`.
+|||  - Reserve one unit of creation capacity.
+|||  - Create a fresh resource outside the CAS section.
 |||
-||| Resource Creation:
-||| - If the waiter is woken with `Nothing`, a new resource is created using the pool's `createResource` action.
-||| - Creation is wrapped in `onAbort` to ensure:
-|||  - If interrupted, the stripe's `available` count is restored.
+||| Wait Path:
+||| - If:
+|||  - cache is empty.
+|||  - and `available == 0`.
+||| - Then:
+|||  - enqueue a `Waiter`.
+|||  - block on `waitForResource`.
+||| - The waiter is eventually:
+|||  - woken with `Just a` when a resource is returned.
+|||  - or `Nothing` when capacity is restored.
+|||
+||| Capacity Semantics:
+||| - `available` represents remaining creation budget.
+||| - It is decremented ONLY when creating a brand-new resource.
+||| - It is restored when:
+|||  - resource creation aborts.
+|||  - resources are destroyed.
 |||
 ||| Concurrency Guarantees:
-||| - The decision (fast vs slow path) is made atomically via CAS.
+||| - Decision logic is atomic via CAS.
 ||| - No IO occurs during CAS evaluation.
-||| - Effects (if any) are executed only after CAS commit.
-||| - Waiters are woken in FIFO order, excluding cancelled waiters.
-||| - No lost wakeups: every enqueued waiter is eventually woken.
-|||
-||| Failure Handling:
-||| - Exceptions during resource creation are propagated.
-||| - Stripe state is restored on aborted creation.
-|||
-||| Returns:
-||| - A tuple of:
-|||  - The acquired resource `a`.
-|||  - The `LocalPool1 World a` from which it was taken.
-|||
-||| Notes:
-||| - Channel allocation occurs before CAS but is only used on the slow path.
-||| - This function does not itself enforce global pool limits, it relies on stripe-level accounting (`available`) to maintain bounds.
+||| - Effects execute exactly once after successful commit.
+||| - Waiters are served FIFO (excluding cancelled waiters).
+||| - No lost wakeups.
 |||
 ||| Invariants:
-||| - `available` reflects capacity for new resource creation.
-||| - Cached entries are always timestamped before insertion.
-||| - Waiters are only stored in the stripe and never mutated externally.
+||| - Total live resources never exceeds stripe capacity.
+||| - Cached resources are timestamped before insertion.
+||| - Waiters exist only inside Stripe state.
 |||
 export
 takeResource :  {n : Nat}
@@ -861,7 +861,7 @@ takeResource pool@(MkPool1 poolconfig@(MkPoolConfig _ free ttl _ _ _) localpools
       ()                                                  # t := cleanStripeIfNeeded ttl free (MkStripe1 striperef) t
       -- pre-allocate channel for slow path
       wake                                                # t := ioToF1 makeChannel t
-      res                                                     : (List (StripeEffect a), Either a (Nat, Channel (Maybe a)))
+      res                                                     : (List (StripeEffect a), Either a (Either () (Nat, Channel (Maybe a))))
       res@(effects, res')                                 # t :=
         casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled) =>
                                 case cache of
@@ -869,44 +869,70 @@ takeResource pool@(MkPool1 poolconfig@(MkPoolConfig _ free ttl _ _ _) localpools
                                   MkEntry v _ :: rest =>
                                     let none : List (StripeEffect a)
                                         none    = [None]
-                                        stripe' = MkStripe (minus available 1)
+                                        stripe' = MkStripe available
                                                            rest
                                                            queue
                                                            queuer
                                                            nextid
                                                            cancelled
-                                        result : Either a (Nat, Channel (Maybe a))
+                                        result : Either a (Either () (Nat, Channel (Maybe a)))
                                         result = Left v
                                       in ( stripe'
                                          , (none, result)
                                          )
                                   -- slow path
                                   []                  =>
-                                    let none : List (StripeEffect a)
-                                        none    = [None]
-                                        wid     = nextid
-                                        waiter : Waiter a
-                                        waiter  = MkWaiter wid wake
-                                        stripe' = MkStripe available
-                                                           cache
-                                                           queue
-                                                           (appendQ queuer waiter)
-                                                           (S nextid)
-                                                           cancelled
-                                        result : Either a (Nat, Channel (Maybe a))
-                                        result = Right (wid, wake)
-                                      in ( stripe'
-                                         , (none, result)
-                                         )
+                                    case available == 0 of
+                                      True  =>
+                                        -- enqueue waiter
+                                        let none : List (StripeEffect a)
+                                            none    = [None]
+                                            wid     = nextid
+                                            waiter : Waiter a
+                                            waiter  = MkWaiter wid wake
+                                            stripe' = MkStripe available
+                                                               cache
+                                                               queue
+                                                               (appendQ queuer waiter)
+                                                               (S nextid)
+                                                               cancelled
+                                            result : Either a (Either () (Nat, Channel (Maybe a)))
+                                            result = Right (Right (wid, wake))
+                                          in ( stripe'
+                                             , (none, result)
+                                             )
+                                      False =>
+                                        -- resource creation slot
+                                        let none : List (StripeEffect a)
+                                            none    = [None]
+                                            stripe' = MkStripe (minus available 1)
+                                                               cache
+                                                               queue
+                                                               queuer
+                                                               nextid
+                                                               cancelled
+                                            result : Either a (Either () (Nat, Channel (Maybe a)))
+                                            result = Right (Left ())
+                                          in ( stripe'
+                                             , (none, result)
+                                             )
+                                        
                              ) t
       -- Run effects after commit
       ()                                                  # t := runEffects stripe1 effects t
     in case res' of
          -- fast path
-         Left v =>
+         Left v                    =>
            (v, lp) # t
-         -- slow path
-         Right (wid, wake) =>
+         -- create immediately
+         Right (Left ())           =>
+           let res # t := ioToF1 (runElinIO (createWithCleanup poolconfig stripe1)) t
+             in case res of
+                  Right v =>
+                    (v, lp) # t
+                  Left err =>
+                    (assert_total $ idris_crash "Data.Pool.takeResource: \{show err}") # t           
+         Right (Right (wid, wake)) =>
            let mres # t := waitForResource stripe1 wid wake t
              in case mres of
                   -- woken with resource
