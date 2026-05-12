@@ -862,7 +862,7 @@ takeResource pool@(MkPool1 poolconfig@(MkPoolConfig _ free ttl _ _ _) localpools
       -- pre-allocate channel for slow path
       wake                                                # t := ioToF1 makeChannel t
       res                                                     : (List (StripeEffect a), Either a (Nat, Channel (Maybe a)))
-      res                                                 # t :=
+      res@(effects, res')                                 # t :=
         casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled) =>
                                 case cache of
                                   -- fast path
@@ -900,8 +900,8 @@ takeResource pool@(MkPool1 poolconfig@(MkPoolConfig _ free ttl _ _ _) localpools
                                          )
                              ) t
       -- Run effects after commit
-      ()                                                  # t := runEffects stripe1 (Builtin.fst res) t
-    in case Builtin.snd res of
+      ()                                                  # t := runEffects stripe1 effects t
+    in case res' of
          -- fast path
          Left v =>
            (v, lp) # t
