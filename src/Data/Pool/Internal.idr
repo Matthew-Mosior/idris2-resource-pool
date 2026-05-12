@@ -89,7 +89,7 @@ data Entry : (a : Type) -> Type where
 ||| - `queue`     : primary FIFO of waiters
 ||| - `queuer`    : secondary FIFO (amortized append)
 ||| - `nextId`    : fresh waiter id supply
-||| - `cancelled` : list of cancelled waiter ids
+||| - `cancelled` : sorted set of cancelled waiter ids
 |||
 ||| Invariants:
 ||| - Stripe is immutable between CAS updates.
