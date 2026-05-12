@@ -910,7 +910,7 @@ takeResource pool@(MkPool1 poolconfig@(MkPoolConfig _ free ttl _ _ _) localpools
            let mres # t := waitForResource stripe1 wid wake t
              in case mres of
                   -- woken with resource
-                  Just v =>
+                  Just v  =>
                     (v, lp) # t
                   -- need to create
                   Nothing =>
@@ -977,7 +977,7 @@ withResource pool f t =
     in case res of
          Right res' =>
            res' # t
-         Left err    =>
+         Left err   =>
            (assert_total $ idris_crash "Data.Pool.withResource: \{show err}") # t
   where
     withResource' :  {n : Nat}
@@ -1057,9 +1057,9 @@ tryTakeResource pool@(MkPool1 _ localpools) t =
                                         )
                                  ) t
         in case res of
-             Nothing  =>
+             Nothing =>
                Nothing # t
-             Just v =>
+             Just v  =>
                Just (v, lp) # t
     tryTakeResource' :  {n : Nat}
                      -> MCancel (Elin World)
@@ -1123,7 +1123,7 @@ tryWithResource pool f t =
     in case res of
          Right res' =>
            res' # t
-         Left err    =>
+         Left err   =>
            (assert_total $ idris_crash "Data.Pool.tryWithResource: \{show err}") # t
   where
     tryWithResource' :  {n : Nat}
