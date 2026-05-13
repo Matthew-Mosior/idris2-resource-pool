@@ -45,6 +45,41 @@ data Queue a
   = QNode a (Queue a)
   | QEnd
 
+||| Result of waking a waiting thread.
+|||
+||| This represents the outcome delivered to a blocked waiter through its wake channel.
+|||
+||| Variants:
+||| - `Deliver a`
+|||  - A resource was directly handed off to the waiter.
+|||
+||| - `Create`
+|||  - No reusable resource was available, but the waiter should proceed by creating a fresh resource using an already-reserved capacity slot.
+|||
+||| - `Cancelled`
+|||  - The waiter was cancelled before receiving a resource.
+|||  - This is used to distinguish cancellation from normal wakeup semantics.
+|||
+||| Design Notes:
+||| - This replaces the older `Maybe a` wake protocol, which overloaded `Nothing` to represent multiple meanings.
+||| - Explicit wake states improve clarity and correctness of the Stripe state machine.
+|||
+||| Guarantees:
+||| - Each waiter receives at most one `WakeResult`.
+||| - Wake results correspond only to committed Stripe transitions.
+||| - No wake result is delivered more than once.
+|||
+||| Invariants:
+||| - `Deliver a` carries ownership transfer of exactly one resource.
+||| - `Create` implies capacity has already been reserved.
+||| - `Cancelled` does not transfer ownership of a resource.
+|||
+public export
+data WakeResult a
+  = Deliver a
+  | Create
+  | Cancelled
+
 ||| A pure waiting token representing a blocked thread.
 |||
 ||| This contains no mutable state. All lifecycle tracking is handled
@@ -62,7 +97,7 @@ data Queue a
 public export
 data Waiter : (a : Type) -> Type where
   MkWaiter :  (id   : Nat)
-           -> (wake : Channel (Maybe a))
+           -> (wake : Channel (WakeResult a))
            -> Waiter a
 
 ||| An existing resource currently sitting in a pool.
@@ -125,8 +160,8 @@ data Stripe1 : (s : Type) -> (a : Type) -> Type where
 |||
 public export
 data StripeEffect a
-  = Wake (Channel (Maybe a)) (Maybe a)
-  | WakeMany (List (Channel (Maybe a), Maybe a))
+  = Wake (Channel (WakeResult a)) (WakeResult a)
+  | WakeMany (List (Channel (WakeResult a), WakeResult a))
   | InsertWithTimestamp a
   | FreeMany (a -> IO ()) (List a)
   | None

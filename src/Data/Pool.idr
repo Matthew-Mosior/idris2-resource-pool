@@ -471,27 +471,26 @@ getLocalPool pools t =
 |||
 export
 signal :  Stripe a
-       -> Maybe a
+       -> WakeResult a
        -> StripeStep a
-signal stripe@(MkStripe available cache queue queuer nextid cancelled) val =
+signal stripe@(MkStripe available cache queue queuer nextid cancelled) result =
   let (mw, MkStripe available' cache' queue' queuer' nextid' cancelled') = dequeueStripe stripe
-    in case (mw, val) of
-         -- Nothing to do
-         (Nothing, Nothing)                  =>
-           MkStripeStep (MkStripe available cache' queue' queuer' nextid' cancelled')
-                        [None]
-         -- No waiter, so store resoure, but defer timestamping
-         (Nothing, Just val')                =>
-           MkStripeStep (MkStripe (S available') cache' queue' queuer' nextid' cancelled')
-                        [InsertWithTimestamp val']
-         -- Waiter, but no value (rare / no-op)
-         (Just (MkWaiter _ wake), Nothing)   =>
+    in case mw of
+         -- no waiting thread
+         Nothing =>
+           case result of
+             Deliver val            =>
+               MkStripeStep (MkStripe (S available') cache' queue' queuer' nextid' cancelled')
+                            [InsertWithTimestamp val]
+             Create                 =>
+               MkStripeStep (MkStripe available' cache' queue' queuer' nextid' cancelled')
+                            [None]
+             Cancelled              =>
+               MkStripeStep (MkStripe available' cache' queue' queuer' nextid' cancelled')
+                            [None]
+         Just (MkWaiter _ wake) =>
            MkStripeStep (MkStripe available' cache' queue' queuer' nextid' cancelled')
-                        [Wake wake Nothing]
-         -- Deliver value directly
-         (Just (MkWaiter _ wake), Just val') =>
-           MkStripeStep (MkStripe available' cache' queue' queuer' nextid' cancelled')
-                        [Wake wake (Just val')]
+                        [Wake wake result]
 
 ||| Block until a resource is delivered to this waiter.
 |||
@@ -529,8 +528,8 @@ signal stripe@(MkStripe available cache queue queuer nextid cancelled) val =
 export
 waitForResource :  Stripe1 World a
                 -> Nat               -- waiter id
-                -> Channel (Maybe a) -- wake channel
-                -> F1 World (Maybe a)
+                -> Channel (WakeResult a) -- wake channel
+                -> F1 World (WakeResult a)
 waitForResource mstripe wid wake t =
   let res # t := ioToF1 (runElinIO (waitForResource' mstripe wid wake)) t
     in case res of
@@ -546,15 +545,15 @@ waitForResource mstripe wid wake t =
       casupdate1 mstripe (\(MkStripe available cache queue queuer nextid cancelled) =>
                            (MkStripe available cache queue queuer nextid (insert wid cancelled), ())
                          ) t
-    waitForResource'' :  Channel (Maybe a)
-                      -> F1 World (Maybe a)
+    waitForResource'' :  Channel (WakeResult a)
+                      -> F1 World (WakeResult a)
     waitForResource'' wake t =
       ioToF1 (channelGet wake) t
     waitForResource' :  MCancel (Elin World)
                      => Stripe1 World a
                      -> Nat
-                     -> Channel (Maybe a)
-                     -> Elin World [Errno] (Maybe a)
+                     -> Channel (WakeResult a)
+                     -> Elin World [Errno] (WakeResult a)
     waitForResource' mstripe wid wake =
       onAbort (runIO (waitForResource'' wake)) (runIO (cleanup mstripe wid))
 
@@ -582,7 +581,7 @@ destroyResource (MkStripe1 striperef) t =
     destroy' :  Stripe1 World a
              -> F1' World
     destroy' (MkStripe1 striperef) t =
-      casWithEffects (MkStripe1 striperef) (\stripe => signal stripe Nothing) t
+      casWithEffects (MkStripe1 striperef) (\stripe => signal stripe Create) t
     destroy :  MCancel (Elin World)
             => Stripe1 World a
             -> Elin World [Errno] ()
@@ -735,7 +734,7 @@ putResource :  Pool1 World n a
             -> F1' World
 putResource (MkPool1 (MkPoolConfig _ free ttl _ _ _) _) (MkStripe1 striperef) val t =
   let () # t := cleanStripeIfNeeded ttl free (MkStripe1 striperef) t
-    in casWithEffects (MkStripe1 striperef) (\stripe => signal stripe (Just val)) t
+    in casWithEffects (MkStripe1 striperef) (\stripe => signal stripe (Deliver val)) t
 
 ||| Destroy all resources in all stripes in the `Pool1 World n a`.
 |||
@@ -862,7 +861,7 @@ takeResource pool@(MkPool1 poolconfig@(MkPoolConfig _ free ttl _ _ _) localpools
       ()                                                  # t := cleanStripeIfNeeded ttl free (MkStripe1 striperef) t
       -- pre-allocate channel for slow path
       wake                                                # t := ioToF1 makeChannel t
-      res                                                     : (List (StripeEffect a), Either a (Either () (Nat, Channel (Maybe a))))
+      res                                                     : (List (StripeEffect a), Either a (Either () (Nat, Channel (WakeResult a))))
       res@(effects, res')                                 # t :=
         casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled) =>
                                 case cache of
@@ -876,7 +875,7 @@ takeResource pool@(MkPool1 poolconfig@(MkPoolConfig _ free ttl _ _ _) localpools
                                                            queuer
                                                            nextid
                                                            cancelled
-                                        result : Either a (Either () (Nat, Channel (Maybe a)))
+                                        result : Either a (Either () (Nat, Channel (WakeResult a)))
                                         result = Left v
                                       in ( stripe'
                                          , (none, result)
@@ -897,7 +896,7 @@ takeResource pool@(MkPool1 poolconfig@(MkPoolConfig _ free ttl _ _ _) localpools
                                                                (appendQ queuer waiter)
                                                                (S nextid)
                                                                cancelled
-                                            result : Either a (Either () (Nat, Channel (Maybe a)))
+                                            result : Either a (Either () (Nat, Channel (WakeResult a)))
                                             result = Right (Right (wid, wake))
                                           in ( stripe'
                                              , (none, result)
@@ -912,7 +911,7 @@ takeResource pool@(MkPool1 poolconfig@(MkPoolConfig _ free ttl _ _ _) localpools
                                                                queuer
                                                                nextid
                                                                cancelled
-                                            result : Either a (Either () (Nat, Channel (Maybe a)))
+                                            result : Either a (Either () (Nat, Channel (WakeResult a)))
                                             result = Right (Left ())
                                           in ( stripe'
                                              , (none, result)
@@ -934,19 +933,21 @@ takeResource pool@(MkPool1 poolconfig@(MkPoolConfig _ free ttl _ _ _) localpools
                   Left err =>
                     (assert_total $ idris_crash "Data.Pool.takeResource: \{show err}") # t           
          Right (Right (wid, wake)) =>
-           let mres # t := waitForResource stripe1 wid wake t
-             in case mres of
+           let wakeresult # t := waitForResource stripe1 wid wake t
+             in case wakeresult of
                   -- woken with resource
-                  Just v  =>
+                  Deliver v =>
                     (v, lp) # t
                   -- need to create
-                  Nothing =>
+                  Create    =>
                     let res # t := ioToF1 (runElinIO (createWithCleanup poolconfig stripe1)) t
                       in case res of
                            Right v =>
                              (v, lp) # t
                            Left err =>
                              (assert_total $ idris_crash "Data.Pool.takeResource: \{show err}") # t
+                  Cancelled =>
+                    (assert_total $ idris_crash "Data.Pool.takeResource: impossible") # t
   where
     createWithCleanup :  PoolConfig a
                       -> Stripe1 World a
@@ -1069,7 +1070,7 @@ tryTakeResource pool@(MkPool1 _ localpools) t =
                                         )
                                       -- cache hit, consume
                                       (False, MkEntry v _ :: rest) =>
-                                        ( MkStripe (minus available 1)
+                                        ( MkStripe available
                                                    rest
                                                    queue
                                                    queuer
