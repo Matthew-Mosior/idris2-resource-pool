@@ -2,6 +2,7 @@ module Main
 
 import AcquireRelease
 import DestroyAllResources
+import FIFO
 import IdleCleanup
 import MaxResourcesBound
 import WaiterResume
@@ -12,4 +13,5 @@ main = do
   () <- test_destroyAllResources
   () <- test_maxResourcesBound
   () <- test_idleCleanup
-  test_waiterResume
+  () <- test_waiterResume
+  test_fifo

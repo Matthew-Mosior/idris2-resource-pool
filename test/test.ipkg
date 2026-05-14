@@ -4,8 +4,7 @@ version    = 0.1.0
 authors    = "Matthew-Mosior"
 version    = 0.1.0
 sourcedir  = "src"
-depends    = hedgehog
-           , posix
+depends    = posix
            , ref1
 		   , resource-pool
 main       = Main

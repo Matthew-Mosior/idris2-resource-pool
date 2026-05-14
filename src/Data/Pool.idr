@@ -7,7 +7,6 @@ import Control.Monad.Elin
 import Control.Monad.MCancel
 import Data.Array
 import Data.Array.Mutable
-import Data.Hashable
 import Data.Linear.Ref1
 import Data.Linear.Traverse1
 import Data.List
@@ -76,9 +75,9 @@ normalize :  Queue (Waiter a)
           -> Queue (Waiter a)
           -> Queue (Waiter a)
 normalize QEnd q2 =
-  reverseQ q2
+  q2
 normalize q1   q2 =
-  appendAll q1 (reverseQ q2)
+  appendAll q1 q2
 
 ||| Dequeue first live waiter.
 dequeueLive :  Queue (Waiter a)
