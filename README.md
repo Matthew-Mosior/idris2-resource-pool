@@ -158,6 +158,12 @@ When the cache is exhausted
 
 ## FIFO Queue Design
 
+This library uses a two-list queue variant, `queue` and `queuer`, found in `Stripe a`:
+- `queue`  <-> front
+- `queuer` <-> appended tail
+
+In this model, `normalize` on `queue` and `queuer` produces the FIFO ordering.
+
 ## Cancellation Model
 
 Instead of mutating waiter nodes, the `cancelled` field (which is a `SortedSet Nat`) of `Stripe a` stores tombstones, which means:
