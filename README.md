@@ -108,6 +108,8 @@ This would catastrophically violate ownership, which this design avoids this com
 
 ## Visual CAS Pipeline
 
+![visual-cas-pipeline-mermaid](resources/visual-cas-pipeline.png)
+
 ## Tracking Effects
 
 The following type is effectively an effect log:
@@ -126,6 +128,8 @@ The CAS transition computes **state mutation** as well as **side-effect intent**
 
 Below is a diagram illustrating the lifecycle of a resource
 
+![resource-lifecycle-mermaid](resources/resource-lifecycle.png)
+
 ## Capacity Accounting
 
 This library tracks available creation slots, which means the following invariant always holds true:
@@ -138,13 +142,19 @@ live_resources + available == stripe_capacity
 
 When the cache contains resources, there are no allocations, waiting or wakeups, only CAS.
 
+![fast-path-mermaid](resources/fast-path.png)
+
 ## Slow Path
 
 Creation is expensive and cancellable, therefor we reserve capacity atomically, create outside CAS, and restore capacity on failure.
 
+![create-path-mermaid](resources/create-path.png)
+
 ## Wait Path
 
 When the cache is exhausted
+
+![wait-path-mermaid](resources/wait-path.png)
 
 ## FIFO Queue Design
 
@@ -157,6 +167,8 @@ Instead of mutating waiter nodes, the `cancelled` field (which is a `SortedSet N
 -  Cancellation becomes monotonic state.
 
 ## Cancellation State Machine
+
+![cancellation-state-machine-mermaid](resources/cancellation-state-machine.png)
 
 ### Notes
 
@@ -188,11 +200,15 @@ Suppose that a resource is destroyed while a waiter exists, we have the ability 
 
 ### Wake/Create Handoff
 
+![wake-create-handoff-mermaid](resources/wake-create-handoff.png)
+
 ## Stripe Locality
 
 The pool that this library exposes is _explicitly_ striped, locality-aware, and thread-affine, because each thread hashes to `threadId mod stripeCount`.  This means that resource tend to remain on the same stripe, the reuse becomes localized, which leads to a low contention.
 
 The following diagram illustrates how locality emerges naturally as a consequence of the internals of the a `Stripe a`:
+
+![locality-emerges-naturally-mermaid](resources/locality-emerges-naturally.png)
 
 ## Opportunistic Cleanup
 
