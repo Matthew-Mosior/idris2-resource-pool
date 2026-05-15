@@ -5,6 +5,7 @@ import DestroyAllResources
 import FIFO
 import IdleCleanup
 import MaxResourcesBound
+import StripeLocality
 import WaiterResume
 
 main : IO ()
@@ -14,4 +15,5 @@ main = do
   () <- test_maxResourcesBound
   () <- test_idleCleanup
   () <- test_waiterResume
-  test_fifo
+  () <- test_fifo
+  test_stripeLocality

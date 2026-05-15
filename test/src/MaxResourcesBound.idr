@@ -1,6 +1,7 @@
 module MaxResourcesBound
 
 import Types
+import Utils
 
 import Data.Linear.Ref1
 import Data.List
@@ -8,20 +9,6 @@ import Data.Nat
 import Data.Pool
 import System
 import System.Posix.Time
-
-private
-newTestStats : IO TestStats
-newTestStats = do
-  created <- newref 0
-  freed   <- newref 0
-  active  <- newref 0
-  maxseen <- newref 0
-  pure $
-    MkTestStats
-      created
-      freed
-      active
-      maxseen
 
 private
 incCreated : TestStats -> IO ()
