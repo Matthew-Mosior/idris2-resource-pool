@@ -32,7 +32,7 @@ This ensures that threads never directly mutate shared structures, they instead:
 
 All concurrent mutation is reduced to atomic replacement of immutable Stripe snapshots.
 
-## Stripe As a State Machine
+## Stripe as a State Machine
 
 This type is the heart of the library:
 
