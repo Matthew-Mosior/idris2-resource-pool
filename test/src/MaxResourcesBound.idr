@@ -16,11 +16,6 @@ incCreated stats =
   runIO (casmod1 stats.created (`plus` 1))
 
 private
-incFreed : TestStats -> IO ()
-incFreed stats =
-  runIO (casmod1 stats.freed (`plus` 1))
-
-private
 resourceEnter : TestStats -> IO ()
 resourceEnter stats = do
   runIO (casmod1 stats.active (`plus` 1))

@@ -7,6 +7,7 @@ import IdleCleanup
 import MaxResourcesBound
 import StripeLocality
 import WaiterResume
+import WakeCreateHandoff
 
 main : IO ()
 main = do
@@ -16,4 +17,5 @@ main = do
   () <- test_idleCleanup
   () <- test_waiterResume
   () <- test_fifo
-  test_stripeLocality
+  () <- test_stripeLocality
+  test_wakeCreateHandoff
