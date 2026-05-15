@@ -210,7 +210,7 @@ Suppose that a resource is destroyed while a waiter exists, we have the ability 
 
 ## Stripe Locality
 
-The pool that this library exposes is _explicitly_ striped, locality-aware, and thread-affine, because each thread hashes to `threadId mod stripeCount`.  This means that resource tend to remain on the same stripe, the reuse becomes localized, which leads to a low contention.
+The pool that this library exposes is _explicitly_ striped, locality-aware, and thread-affine, because each thread hashes to `threadId mod stripeCount`.  This means that a given resource tends to remain on the same stripe, the reuse becomes localized, which leads to low contention.
 
 The following diagram illustrates how locality emerges naturally as a consequence of the internals of the a `Stripe a`:
 
