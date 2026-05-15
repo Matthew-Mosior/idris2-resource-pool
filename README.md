@@ -183,7 +183,7 @@ Instead of mutating waiter nodes, the `cancelled` field (which is a `SortedSet N
 
 ### Why lazy cancellation matters
 
-Correctness is much simpler due to avoiding immediate removal, instead we have immutable queues, tombstones, and lazy skipping
+Correctness is much simpler due to avoiding immediate removal, instead we have immutable queues, tombstones, and lazy skipping.
 
 ### Core Cancellation Algorithm
 
