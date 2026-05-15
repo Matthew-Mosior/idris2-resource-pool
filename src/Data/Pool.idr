@@ -82,27 +82,30 @@ normalize q1   q2 =
 ||| Dequeue first live waiter.
 dequeueLive :  Queue (Waiter a)
             -> SortedSet Nat
-            -> (Maybe (Waiter a), Queue (Waiter a))
+            -> (Maybe (Waiter a), Queue (Waiter a), SortedSet Nat)
 dequeueLive QEnd                              cancelled =
-  (Nothing, QEnd)
+  (Nothing, QEnd, cancelled)
 dequeueLive (QNode w@(MkWaiter id wake) rest) cancelled =
   case contains id cancelled of
     True  =>
-      dequeueLive rest cancelled
+      -- cancelled waiter
+      -- consume tombstone and continue
+      dequeueLive rest (delete id cancelled)
     False =>
-      (Just w, rest)
+      -- live waiter
+      (Just w, rest, cancelled)
 
 ||| Stripe-level dequeue.
 dequeueStripe :  Stripe a
               -> (Maybe (Waiter a), Stripe a)
 dequeueStripe (MkStripe available cache queue queuer nextid cancelled) =
-  let fullq      = normalize queue queuer
-      (mw, rest) = dequeueLive fullq cancelled
+  let fullq                  = normalize queue queuer
+      (mw, rest, cancelled') = dequeueLive fullq cancelled
     in case mw of
          Nothing =>
-           (Nothing, MkStripe available cache QEnd QEnd nextid cancelled)
+           (Nothing, MkStripe available cache QEnd QEnd nextid cancelled')
          Just w  =>
-           (Just w, MkStripe available cache rest QEnd nextid cancelled)
+           (Just w, MkStripe available cache rest QEnd nextid cancelled')
 
 ||| Check to see if entry is stale.
 isStale :  Clock Duration
