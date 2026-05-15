@@ -5,6 +5,7 @@ import DestroyAllResources
 import FIFO
 import IdleCleanup
 import MaxResourcesBound
+import ResourceLocality
 import StripeLocality
 import WaiterResume
 import WakeCreateHandoff
@@ -18,4 +19,5 @@ main = do
   () <- test_waiterResume
   () <- test_fifo
   () <- test_stripeLocality
+  () <- test_resourceLocality
   test_wakeCreateHandoff
