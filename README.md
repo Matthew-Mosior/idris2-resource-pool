@@ -178,7 +178,7 @@ Instead of mutating waiter nodes, the `cancelled` field (which is a `SortedSet N
 
 ### Notes
 
--   Cancellation does NOT remove queue nodes immediately.
+-   Cancellation does not remove queue nodes immediately.
 -   Cleanup occurs lazily during dequeue.
 
 ### Why lazy cancellation matters
