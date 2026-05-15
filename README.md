@@ -4,7 +4,7 @@ This library implements a lock-free striped resource allocator whose entire conc
 
 #### Note
 
-This libraries internals heavily utilizes the [idris2-ref1](https://github.com/stefan-hoeck/idris2-ref1) and [idris2-elin](https://github.com/stefan-hoeck/idris2-elin) libraries, so you may want to familiarize yourself with these two foundational libraries first.
+This library's internals heavily utilizes the [idris2-ref1](https://github.com/stefan-hoeck/idris2-ref1) and [idris2-elin](https://github.com/stefan-hoeck/idris2-elin) libraries, so you may want to familiarize yourself with these two foundational libraries first.
 
 ## Model
 
