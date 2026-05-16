@@ -208,9 +208,9 @@ Suppose that a resource is destroyed while a waiter exists, we have the ability 
 
 ![wake-create-handoff-mermaid](resources/wake-create-handoff.png)
 
-## Stripe Locality
+## Stripe Locality - Deterministic Thread-to-Stripe Routing
 
-The pool that this library exposes is _explicitly_ striped, locality-aware, and thread-affine, because each thread hashes to `threadId mod stripeCount`.  This means that a given resource tends to remain on the same stripe, the reuse becomes localized, which leads to low contention.
+The pool uses deterministic stripe routing based on thread id modulo stripe count. This creates probabilistic locality by causing threads to repeatedly interact with the same stripe-local cache, reducing global contention and increasing resource reuse locality.
 
 The following diagram illustrates how locality emerges naturally as a consequence of the internals of the a `Stripe a`:
 
