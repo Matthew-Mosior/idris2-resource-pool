@@ -1,6 +1,6 @@
 # A high-performance striped resource pooling implementation
 
-This library implements a lock-free striped resource allocator whose entire concurrency model is encoded as a pure [compare-and-swap](https://en.wikipedia.org/wiki/Compare-and-swap) (CAS) driven state machine (via the [idris2-ref1](https://github.com/stefan-hoeck/idris2-ref1) library) over immutable `Stripe` values.
+This library implements a lock-free striped resource pool whose entire concurrency model is encoded as a pure [compare-and-swap](https://en.wikipedia.org/wiki/Compare-and-swap) (CAS) driven state machine (via the [idris2-ref1](https://github.com/stefan-hoeck/idris2-ref1) library) over immutable `Stripe` values.
 
 #### Note
 
