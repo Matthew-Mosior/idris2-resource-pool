@@ -216,6 +216,10 @@ The following diagram illustrates how locality emerges naturally as a consequenc
 
 ![locality-emerges-naturally-mermaid](resources/locality-emerges-naturally.png)
 
+### Resource Reuse Cycle
+
+![resource-reuse-cycle-mermaid](resources/resource-reuse-cycle.png)
+
 ## Opportunistic Cleanup
 
 Unlike Haskell's `resource-pool`, this library does not employ reaper threads, timer managers, or global cleanup loops.  Instead, cleanup occurs during normal operations via `cleanStripeIfNeeded`. This naturally makes cleanup deterministic, localized, and contention-friendly.  The tradeoff with this design is that idle stripes retain stale entries longer, which is often acceptable.
