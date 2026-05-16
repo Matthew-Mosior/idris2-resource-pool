@@ -60,7 +60,7 @@ Most pool libraries spread state across the following:
 -   Exception handlers
 -   Background threads
 
-This implementation instead centralizes everything into `Stripe a`, which makes the concurrency semantics **explicit** and **deterministic**. This is much closer to a distributed systems state machines or a lock-free runtime design than Haskell's [resource-pool](https://hackage.haskell.org/package/resource-pool) library.
+This implementation instead centralizes everything into `Stripe a`, which makes the concurrency semantics **explicit** and **deterministic**. This is much closer to a distributed systems state machine or a lock-free runtime design than Haskell's [resource-pool](https://hackage.haskell.org/package/resource-pool) library.
 
 ## CAS Transition Model
 
