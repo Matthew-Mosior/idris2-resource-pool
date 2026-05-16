@@ -79,7 +79,7 @@ record StripeStep a where
   effects : List (StripeEffect a)
 ```
 
-This separation is extremely important, as it enforces the boundary between CAS state machine transitions, and effects, and prevents:
+This separation is extremely important, as it enforces the boundary between CAS state machine transitions, and effects, which therefore prevents:
 -   Duplicated wakeups, frees and inserts
 -   Lost resources
 -   Retry corruption
