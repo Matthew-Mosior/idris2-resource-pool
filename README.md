@@ -210,7 +210,7 @@ Suppose that a resource is destroyed while a waiter exists, we have the ability 
 
 ## Stripe Locality - Deterministic Thread-to-Stripe Routing
 
-The pool uses deterministic stripe routing based on thread id modulo stripe count. This creates probabilistic locality by causing threads to repeatedly interact with the same stripe-local cache, reducing global contention and increasing resource reuse locality.
+The pool implementation this library provides uses deterministic stripe routing based on thread id modulo stripe count. This creates probabilistic locality by causing threads to repeatedly interact with the same stripe-local cache, reducing global contention and increasing resource reuse locality.
 
 The following diagram illustrates how locality emerges naturally as a consequence of the internals of the a `Stripe a`:
 
