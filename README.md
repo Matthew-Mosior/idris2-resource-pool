@@ -70,7 +70,7 @@ Every operation can be boiled down to the following:
 Stripe a -> StripeStep a
 ```
 
-Where a `StripeStep a` is defined as:
+Where `StripeStep a` is defined as:
 
 ```
 record StripeStep a where
