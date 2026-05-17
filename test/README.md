@@ -3,24 +3,24 @@
 This resource pool implementation has several major correctness properties:
 
 1. Resource conservation
-   - Resources are never duplicated.
-   - Resources are never leaked.
-   - Total live resources never exceed capacity.
-2. FIFO waiter fairness
-   - Blocked waiters resume in enqueue order.
-3.  Wakeup correctness
-   - Wakeups are not lost.
-   - Cancelled waiters do not consume wakeups.
-   - Wake/Create semantics are correct.
+  - Resources are never duplicated.
+  - Resources are never leaked.
+  - Total live resources never exceed capacity.
+3. FIFO waiter fairness
+  - Blocked waiters resume in enqueue order.
+4.  Wakeup correctness
+  - Wakeups are not lost.
+  - Cancelled waiters do not consume wakeups.
+  - Wake/Create semantics are correct.
 4. Stripe locality
-   - Threads consistently hit the same stripe.
-   - Cached resources remain local to their stripe.
+  - Threads consistently hit the same stripe.
+  - Cached resources remain local to their stripe.
 5. Cleanup correctness
-   - Idle resources eventually free.
-   - Cleanup never frees live resources.
+  - Idle resources eventually free.
+  - Cleanup never frees live resources.
 6. CAS/effect correctness
-   - Side effects execute exactly once.
-   - Retries never duplicate effects.
+  - Side effects execute exactly once.
+  - Retries never duplicate effects.
 
 Each test isolates and verifies one of the above properties.
 
