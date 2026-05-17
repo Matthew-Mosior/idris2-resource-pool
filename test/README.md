@@ -8,7 +8,7 @@ This resource pool implementation has several major correctness properties:
    - Total live resources never exceed capacity.
 2. FIFO waiter fairness
    - Blocked waiters resume in enqueue order.
-3.  Wakeup correctness.
+4.  Wakeup correctness.
    - Wakeups are not lost.
    - Cancelled waiters do not consume wakeups.
    - Wake/Create semantics are correct.
