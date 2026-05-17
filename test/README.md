@@ -86,7 +86,7 @@ This validates waiter wakeup correctness, as it verifies:
 - No extra creation occurs.
 - Wakeup path works.
 
-## 9. test_wakeCreateHandoff
+## test_wakeCreateHandoff
 
 This is one of the most subtle tests, since it validates the `Create` wake protocol, as it verifies:
 - Destroyed resources restore creation ability.
