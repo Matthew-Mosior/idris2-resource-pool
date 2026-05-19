@@ -18,17 +18,18 @@ Pool ├── Stripe 0  (independent CAS machine)
 ```
 
 Each stripe owns:
+
 - Creation capacity
 - Cached resources
 - Waiter queues
 - Cancellation tombstones
 
-
 This ensures that threads never directly mutate shared structures, they instead:
-1.  Read immutable stripe state.
-2.  Compute a new immutable stripe.
-3.  CAS the old stripe, and replace with new stripe.
-4.  Execute deferred effects after commit.
+
+1. Read immutable stripe state.
+2. Compute a new immutable stripe.
+3. CAS the old stripe, and replace with new stripe.
+4. Execute deferred effects after commit.
 
 All concurrent mutation is reduced to atomic replacement of immutable Stripe snapshots.
 
@@ -53,12 +54,12 @@ data Stripe a where
 
 Most pool libraries spread state across the following:
 
--   Semaphores
--   Queues
--   Thread state
--   Mutable counters
--   Exception handlers
--   Background threads
+- Semaphores
+- Queues
+- Thread state
+- Mutable counters
+- Exception handlers
+- Background threads
 
 This implementation instead centralizes everything into `Stripe a`, which makes the concurrency semantics **explicit** and **deterministic**. This is much closer to a distributed systems state machine or a lock-free runtime design than Haskell's [resource-pool](https://hackage.haskell.org/package/resource-pool) library.
 
@@ -80,9 +81,10 @@ record StripeStep a where
 ```
 
 This separation is extremely important, as it enforces the boundary between CAS state machine transitions, and effects, which therefore prevents:
--   Duplicated wakeups, frees and inserts
--   Lost resources
--   Retry corruption
+
+- Duplicated wakeups, frees and inserts
+- Lost resources
+- Retry corruption
 
 Below summarizes the general CAS transistion model flow:
 
@@ -165,6 +167,7 @@ When the cache is exhausted
 ## FIFO Queue Design
 
 This library uses a two-list queue variant, `queue` and `queuer`, found in `Stripe a`:
+
 - `queue`  <-> front
 - `queuer` <-> appended tail
 
@@ -174,9 +177,9 @@ In this model, `normalize` on `queue` and `queuer` produces the FIFO ordering.
 
 Instead of mutating waiter nodes, the `cancelled` field (which is a `SortedSet Nat`) of `Stripe a` stores tombstones, which means:
 
--  Waiters remain immutable.
--  Queue structure remains immutable.
--  Cancellation becomes monotonic state.
+- Waiters remain immutable.
+- Queue structure remains immutable.
+- Cancellation becomes monotonic state.
 
 ## Cancellation State Machine
 
@@ -186,8 +189,8 @@ Instead of mutating waiter nodes, the `cancelled` field (which is a `SortedSet N
 
 ### Notes
 
--   Cancellation does not remove queue nodes immediately.
--   Cleanup occurs lazily during dequeue.
+- Cancellation does not remove queue nodes immediately.
+- Cleanup occurs lazily during dequeue.
 
 ### Why lazy cancellation matters
 
@@ -196,6 +199,7 @@ Correctness is much simpler due to avoiding immediate removal, instead we have i
 ### Core Cancellation Algorithm
 
 `dequeueLive` is the core cancellation algorithm, as it:
+
 1. Pop queue head  
 2. Check tombstone set  
 3. If cancelled:  
