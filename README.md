@@ -2,7 +2,7 @@
 
 This library implements a lock-free striped resource pool whose entire concurrency model is encoded as a pure [compare-and-swap](https://en.wikipedia.org/wiki/Compare-and-swap) (CAS) driven state machine (via the [idris2-ref1](https://github.com/stefan-hoeck/idris2-ref1) library) over immutable `Stripe` values.
 
-#### Note
+## Note
 
 The internals of this library heavily utilize the [idris2-ref1](https://github.com/stefan-hoeck/idris2-ref1) and [idris2-elin](https://github.com/stefan-hoeck/idris2-elin) libraries, so you may want to familiarize yourself with these two first.
 
