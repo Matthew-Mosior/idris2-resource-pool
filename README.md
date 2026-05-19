@@ -9,7 +9,7 @@ This library implements a lock-free striped resource pool whose entire concurren
 
 At runtime, the system looks like this:
 
-```
+```idris
 Pool ├── Stripe 0  (independent CAS machine)
      ├── Stripe 1  (independent CAS machine)
      ├── Stripe 2  (independent CAS machine)
@@ -36,7 +36,7 @@ All concurrent mutation is reduced to atomic replacement of immutable Stripe sna
 
 This type is the heart of the library:
 
-```
+```idris
 data Stripe a where
   MkStripe :  (available : Nat)
            -> (cache : List (Entry a))
@@ -66,13 +66,13 @@ This implementation instead centralizes everything into `Stripe a`, which makes 
 
 Every operation can be boiled down to the following:
 
-```
+```idris
 Stripe a -> StripeStep a
 ```
 
 Where `StripeStep a` is defined as:
 
-```
+```idris
 record StripeStep a where
   constructor MkStripeStep
   stripe  : Stripe a
@@ -101,7 +101,7 @@ Suppose wakeups occurred inside CAS evaluation.
 
 Then CAS retry could produce:
 
-```
+```text
 Wake waiterCAS failsRetryWake waiter again
 ```
 
@@ -115,7 +115,7 @@ This would catastrophically violate ownership, which this design avoids this com
 
 The following type is effectively an effect log:
 
-```
+```idris
 data StripeEffect a  
 = Wake ...
 | InsertWithTimestamp a
@@ -137,7 +137,7 @@ Below is a diagram illustrating the lifecycle of a resource
 
 This library tracks available creation slots, which means the following invariant always holds true:
 
-```
+```text
 live_resources + available == stripe_capacity
 ```
 
