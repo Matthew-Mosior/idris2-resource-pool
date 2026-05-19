@@ -128,7 +128,9 @@ The CAS transition computes **state mutation** as well as **side-effect intent**
 
 Below is a diagram illustrating the lifecycle of a resource
 
-![resource-lifecycle-mermaid](resources/resource-lifecycle.png)
+<p align="center">
+  <img src="resources/resource-lifecycle.png" alt="resource-lifecycle-mermaid">
+</p>
 
 ## Capacity Accounting
 
@@ -142,7 +144,9 @@ live_resources + available == stripe_capacity
 
 When the cache contains resources, there are no allocations, waiting or wakeups, only CAS.
 
-![fast-path-mermaid](resources/fast-path.png)
+<p align="center">
+  <img src="resources/fast-path.png" alt="fast-path-mermaid">
+</p>
 
 ## Slow Path
 
@@ -154,7 +158,9 @@ Creation is expensive and cancellable, therefor we reserve capacity atomically, 
 
 When the cache is exhausted
 
-![wait-path-mermaid](resources/wait-path.png)
+<p align="center">
+  <img src="resources/wait-path.png" alt="wait-path-mermaid">
+</p>
 
 ## FIFO Queue Design
 
@@ -174,7 +180,9 @@ Instead of mutating waiter nodes, the `cancelled` field (which is a `SortedSet N
 
 ## Cancellation State Machine
 
-![cancellation-state-machine-mermaid](resources/cancellation-state-machine.png)
+<p align="center">
+  <img src="resources/cancellation-state-machine.png" alt="cancellation-state-machine-mermaid">
+</p>
 
 ### Notes
 
