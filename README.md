@@ -9,7 +9,7 @@ This library implements a lock-free striped resource pool whose entire concurren
 
 At runtime, the system looks like this:
 
-```idris
+```text
 Pool ├── Stripe 0  (independent CAS machine)
      ├── Stripe 1  (independent CAS machine)
      ├── Stripe 2  (independent CAS machine)
