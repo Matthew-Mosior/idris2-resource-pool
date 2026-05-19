@@ -2,9 +2,8 @@
 
 This library implements a lock-free striped resource pool whose entire concurrency model is encoded as a pure [compare-and-swap](https://en.wikipedia.org/wiki/Compare-and-swap) (CAS) driven state machine (via the [idris2-ref1](https://github.com/stefan-hoeck/idris2-ref1) library) over immutable `Stripe` values.
 
-## Note
-
-The internals of this library heavily utilize the [idris2-ref1](https://github.com/stefan-hoeck/idris2-ref1) and [idris2-elin](https://github.com/stefan-hoeck/idris2-elin) libraries, so you may want to familiarize yourself with these two first.
+> [!NOTE]
+> The internals of this library heavily utilize the [idris2-ref1](https://github.com/stefan-hoeck/idris2-ref1) and [idris2-elin](https://github.com/stefan-hoeck/idris2-elin) libraries, so you may want to familiarize yourself with these two first.
 
 ## Model
 
@@ -222,7 +221,7 @@ Suppose that a resource is destroyed while a waiter exists, we have the ability 
 
 ## Stripe Locality - Deterministic Thread-to-Stripe Routing
 
-The pool implementation this library provides uses deterministic stripe routing based on thread id modulo stripe count. This creates probabilistic locality by causing threads to repeatedly interact with the same stripe-local cache, reducing global contention and increasing resource reuse locality.
+The pool implementation this library provides uses deterministic stripe routing based on thread ID modulo stripe count. This creates probabilistic locality by causing threads to repeatedly interact with the same stripe-local cache, reducing global contention and increasing resource reuse locality.
 
 The following diagram illustrates how locality emerges naturally as a consequence of the internals of the a `Stripe a`:
 
