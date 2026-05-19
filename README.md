@@ -66,7 +66,7 @@ This implementation instead centralizes everything into `Stripe a`, which makes 
 
 Every operation can be boiled down to the following:
 
-```idris
+```text
 Stripe a -> StripeStep a
 ```
 
@@ -87,7 +87,7 @@ This separation is extremely important, as it enforces the boundary between CAS 
 
 Below summarizes the general CAS transistion model flow:
 
-```
+```text
 Pure Transition
     ↓
 CAS Commit
