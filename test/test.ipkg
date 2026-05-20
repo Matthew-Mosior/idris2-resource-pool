@@ -2,7 +2,6 @@ package resource-pool-test
 
 version    = 0.1.0
 authors    = "Matthew-Mosior"
-version    = 0.1.0
 sourcedir  = "src"
 depends    = posix
            , ref1
