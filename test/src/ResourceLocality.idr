@@ -31,8 +31,8 @@ test_resourceLocality = do
                   LTESucc (LTESucc (LTESucc (LTESucc LTEZero)))))
           "resource-locality"
   pool <- runIO (newPool 4 cfg)
-  observations <- for [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20] $ \_ => do
-    (r@(MkTestResource rid), MkLocalPool1 sid stripe _) <- runIO (takeResource pool)
+  observations : List (Nat, Nat) <- for [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20] $ \_ => do
+    (r@(MkTestResource rid), MkLocalPool1 sid stripe) <- runIO (takeResource pool)
     runIO (putResource pool stripe r)
     pure (sid, rid)
   case observations of

@@ -37,7 +37,7 @@ test_fifo = do
                   LTESucc LTEZero))
           "fifo"
   pool <- runIO (newPool 1 cfg)
-  (r, lp@(MkLocalPool1 _ stripe _)) <- runIO (takeResource pool)
+  (r, lp@(MkLocalPool1 _ stripe)) <- runIO (takeResource pool)
   orderref <- newref []
   starts <- traverse (\_ => makeChannel) [0,1,2,3,4,5,6,7,8,9]
   for_ (zip [0,1,2,3,4,5,6,7,8,9] starts) $ \(i, start) =>

@@ -32,7 +32,7 @@ test_wakeCreateHandoff = do
           "wake-create"
   pool <- runIO (newPool 1 cfg)
   -- exhaust pool
-  (r1, MkLocalPool1 _ stripe _) <- runIO (takeResource pool)
+  (r1, MkLocalPool1 _ stripe) <- runIO (takeResource pool)
   -- waiter coordination
   started <- makeChannel
   acquired <- newref False

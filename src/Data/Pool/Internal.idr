@@ -189,7 +189,6 @@ public export
 data LocalPool1 : (s : Type) -> (a : Type) -> Type where
   MkLocalPool1 :  (stripeid : Nat)
                -> (stripevar : Stripe1 s a)
-               -> (cleanerref : IORef ())
                -> LocalPool1 s a
 
 ||| Striped resource pool based on linear mutable references.

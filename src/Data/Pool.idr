@@ -328,8 +328,7 @@ newPool numstripes pc@(MkPoolConfig create free cachettl (maxres ** prfmaxres) _
                                                 empty
                                      ) t
               striperef1     := MkStripe1 striperef
-              cleanerref # t := ref1 () t
-              localpool      := MkLocalPool1 j striperef1 cleanerref
+              localpool      := MkLocalPool1 j striperef1
             in case tryNatToFin j of
                  Nothing =>
                    (assert_total $ idris_crash "Data.Pool.newPool.saturatePools: couldn't convert Nat to Fin") # t
@@ -770,8 +769,8 @@ destroyAllResources (MkPool1 (MkPoolConfig _ freeresource _ _ _ _) _) localpools
     go o Z     _   t =
       () # t
     go o (S j) arr t =
-      let MkLocalPool1 _ stripe1 _ # t := getIx arr j t
-          ()                       # t := cleanStripe (const True) freeresource stripe1 t
+      let MkLocalPool1 _ stripe1 # t := getIx arr j t
+          ()                     # t := cleanStripe (const True) freeresource stripe1 t
         in go o j arr t
 
 ||| Restore one unit of available capacity in the `Stripe a`.
@@ -858,13 +857,13 @@ takeResource :  {n : Nat}
              -> Pool1 World n a
              -> F1 World (a, LocalPool1 World a)
 takeResource pool@(MkPool1 poolconfig@(MkPoolConfig _ free ttl _ _ _) localpools) t =
-  let lp@(MkLocalPool1 _ stripe1@(MkStripe1 striperef) _) # t := getLocalPool localpools t
+  let lp@(MkLocalPool1 _ stripe1@(MkStripe1 striperef)) # t := getLocalPool localpools t
       -- clean stripe if needed
-      ()                                                  # t := cleanStripeIfNeeded ttl free (MkStripe1 striperef) t
+      ()                                                # t := cleanStripeIfNeeded ttl free (MkStripe1 striperef) t
       -- pre-allocate channel for slow path
-      wake                                                # t := ioToF1 makeChannel t
-      res                                                     : (List (StripeEffect a), Either a (Either () (Nat, Channel (WakeResult a))))
-      res@(effects, res')                                 # t :=
+      wake                                              # t := ioToF1 makeChannel t
+      res                                                   : (List (StripeEffect a), Either a (Either () (Nat, Channel (WakeResult a))))
+      res@(effects, res')                               # t :=
         casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled) =>
                                 case cache of
                                   -- fast path
@@ -921,7 +920,7 @@ takeResource pool@(MkPool1 poolconfig@(MkPoolConfig _ free ttl _ _ _) localpools
                                         
                              ) t
       -- Run effects after commit
-      ()                                                  # t := runEffects stripe1 effects t
+      ()                                                # t := runEffects stripe1 effects t
     in case res' of
          -- fast path
          Left v                    =>
@@ -1017,7 +1016,7 @@ withResource pool f t =
                   -> Elin World [Errno] r
     withResource' pool f =
       uncancelable $ \poll => do
-        (res, MkLocalPool1 _ (MkStripe1 striperef) _) <- runIO (takeResource pool)
+        (res, MkLocalPool1 _ (MkStripe1 striperef)) <- runIO (takeResource pool)
         res' <- onAbort (poll $ liftIO $ f res) (runIO (destroyResource (MkStripe1 striperef)))
         runIO (putResource pool (MkStripe1 striperef) res)
         pure res'
@@ -1058,11 +1057,11 @@ tryTakeResource pool@(MkPool1 _ localpools) t =
                       => Pool1 World n a
                       -> F1 World (Maybe (a, LocalPool1 World a))
     tryTakeResource'' pool@(MkPool1 (MkPoolConfig _ free ttl _ _ _) _) t =
-      let lp@(MkLocalPool1 _ stripe1@(MkStripe1 striperef) _) # t := getLocalPool localpools t
+      let lp@(MkLocalPool1 _ stripe1@(MkStripe1 striperef)) # t := getLocalPool localpools t
           -- clean stripe if needed
-          ()                                                  # t := cleanStripeIfNeeded ttl free (MkStripe1 striperef) t
+          ()                                                # t := cleanStripeIfNeeded ttl free (MkStripe1 striperef) t
           -- attempt fast-path only
-          res                                                 # t :=
+          res                                               # t :=
             casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled) =>
                                     case (available == 0, cache) of
                                       -- no capacity, do nothing
@@ -1165,9 +1164,9 @@ tryWithResource pool f t =
       uncancelable $ \poll => do
         res <- runIO (tryTakeResource pool)
         case res of
-          Nothing                                             =>
+          Nothing                                           =>
             pure Nothing
-          Just (res', MkLocalPool1 _ (MkStripe1 striperef) _) => do
+          Just (res', MkLocalPool1 _ (MkStripe1 striperef)) => do
             res'' <- onAbort (poll $ liftIO $ f res') (runIO (destroyResource (MkStripe1 striperef)))
             runIO (putResource pool (MkStripe1 striperef) res')
             pure $ Just res''
