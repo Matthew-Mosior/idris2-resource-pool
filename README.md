@@ -113,14 +113,15 @@ This would catastrophically violate ownership, which this design avoids this com
 
 ## Tracking Effects
 
-The following type is effectively an effect log:
+The following type is an effect log:
 
 ```idris
-data StripeEffect a  
-= Wake ...
-| InsertWithTimestamp a
-| FreeMany ...
-| None
+data StripeEffect a
+  = Wake (Channel (WakeResult a)) (WakeResult a)
+  | WakeMany (List (Channel (WakeResult a), WakeResult a))
+  | InsertWithTimestamp a
+  | FreeMany (a -> IO ()) (List a)
+  | None
 ```
 
 The CAS transition computes **state mutation** as well as **side-effect intent** (neither are performed until commit succeeds).
