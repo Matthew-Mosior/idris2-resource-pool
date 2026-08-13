@@ -467,7 +467,22 @@ getLocalPool pools t =
           sid' := remInt sid (cast {to=Int} n)
         in case sid' of
              Nothing    =>
-               Nothing # t
+               let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
+                 in case realtimenow of
+                      Left realtimenowerr =>
+                        let newerrors := [ MkResourcePoolError "Data.Pool.getLocalPool" (show realtimenowerr) Nothing
+                                         , MkResourcePoolError "Data.Pool.getLocalPool" "division by zero" Nothing
+                                         ]
+                            ()    # t := casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled errors) =>
+                                                                 (MkStripe available cache queue queuer nextid cancelled (errors ++ newerrors), ())
+                                                              ) t
+                          in Nothing # t
+                      Right realtimenow'  =>
+                        let newerrors := [MkResourcePoolError "Data.Pool.getLocalPool" "division by zero" (Just realtimenow')]
+                            ()    # t := casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled errors) =>
+                                                                 (MkStripe available cache queue queuer nextid cancelled (errors ++ newerrors), ())
+                                                              ) t
+                          in Nothing # t
              Just sid'' =>
                case tryNatToFin (cast {to=Nat} sid'') of
                  Nothing     =>
@@ -495,7 +510,22 @@ getLocalPool pools t =
           sid'    := remInt sid (cast {to=Int} n)
         in case sid' of
              Nothing    =>
-               Nothing # t
+               let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
+                 in case realtimenow of
+                      Left realtimenowerr =>
+                        let newerrors := [ MkResourcePoolError "Data.Pool.getLocalPool" (show realtimenowerr) Nothing
+                                         , MkResourcePoolError "Data.Pool.getLocalPool" "division by zero" Nothing
+                                         ]
+                            ()    # t := casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled errors) =>
+                                                                 (MkStripe available cache queue queuer nextid cancelled (errors ++ newerrors), ())
+                                                              ) t
+                          in Nothing # t
+                      Right realtimenow'  =>
+                        let newerrors := [MkResourcePoolError "Data.Pool.getLocalPool" "division by zero" (Just realtimenow')]
+                            ()    # t := casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled errors) =>
+                                                                 (MkStripe available cache queue queuer nextid cancelled (errors ++ newerrors), ())
+                                                              ) t
+                          in Nothing # t
              Just sid'' =>
                case tryNatToFin (cast {to=Nat} sid'') of
                  Nothing     =>
