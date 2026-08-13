@@ -1072,7 +1072,7 @@ takeResource pool@(MkPool1 poolconfig@(MkPoolConfig _ free ttl _ _ _) localpools
                       in case realtimenow of
                            Left realtimenowerr =>
                              let newerrors := [ MkResourcePoolError "Data.Pool.takeResource" (show realtimenowerr) Nothing
-                                              , MkResourcePoolError "Data.Pool.takeResource" (show err) Nothing
+                                              , MkResourcePoolError "Data.Pool.takeResource" "Data.Pool.waitForResource failed" Nothing
                                               ]
                                  ()    # t := casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled errors) =>
                                                                       (MkStripe available cache queue queuer nextid cancelled (errors ++ newerrors), ())
@@ -1180,14 +1180,15 @@ export
 withResource :  {n : Nat}
              -> Pool1 World n a
              -> (a -> IO r)
-             -> F1 World (Either () r)
-withResource pool f t =
+             -> F1 World (Either () (Maybe r))
+withResource pool@(MkPool1 _ localpools) f t =
   let res # t := ioToF1 (runElinIO (withResource' pool f)) t
     in case res of
          Right res' =>
            Right res' # t
          Left err   =>
-           let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
+           let lp@(MkLocalPool1 _ stripe1@(MkStripe1 striperef)) # t := getLocalPool localpools t
+               realtimenow # t := ioToF1 (runElinIO grabRealTime) t
              in case realtimenow of
                   Left realtimenowerr =>
                     let newerrors := [ MkResourcePoolError "Data.Pool.withResource" (show realtimenowerr) Nothing
@@ -1208,13 +1209,32 @@ withResource pool f t =
                   -> MCancel (Elin World)
                   => Pool1 World n a
                   -> (a -> IO r)
-                  -> Elin World [Errno] r
+                  -> Elin World [Errno] (Maybe r)
     withResource' pool f =
       uncancelable $ \poll => do
         (res, MkLocalPool1 _ (MkStripe1 striperef)) <- runIO (takeResource pool)
-        res' <- onAbort (poll $ liftIO $ f res) (runIO (destroyResource (MkStripe1 striperef)))
-        runIO (putResource pool (MkStripe1 striperef) res)
-        pure res'
+        case res of
+          Left ()    => do
+            realtimenow <- runElinIO grabRealTime
+            case realtimenow of
+              Left realtimenowerr => do
+                let newerrors = [ MkResourcePoolError "Data.Pool.withResource.withResource'" (show realtimenowerr) Nothing
+                                 , MkResourcePoolError "Data.Pool.withResource.withResource'" "Data.Pool.takeResource failed" Nothing
+                                 ]
+                ()            <- update striperef (\(MkStripe available cache queue queuer nextid cancelled errors) =>
+                                                     (MkStripe available cache queue queuer nextid cancelled (errors ++ newerrors), ())
+                                                  )
+                pure Nothing
+              Right realtimenow'  => do
+                let newerrors = [MkResourcePoolError "Data.Pool.withResource.withResource'" "Data.Pool.takeResource failed" (Just realtimenow')]
+                ()            <- update striperef (\(MkStripe available cache queue queuer nextid cancelled errors) =>
+                                                     (MkStripe available cache queue queuer nextid cancelled (errors ++ newerrors), ())
+                                                  )
+                pure Nothing
+          Right res' => do
+            res'' <- onAbort (poll $ liftIO $ f res') (runIO (destroyResource (MkStripe1 striperef)))
+            runIO (putResource pool (MkStripe1 striperef) res')
+            pure (Just res'')
 
 ||| Attempt to take a resource without blocking.
 |||
@@ -1245,7 +1265,8 @@ tryTakeResource pool@(MkPool1 _ localpools) t =
          Right res'  =>
            Right res' # t
          Left err    =>
-           let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
+           let lp@(MkLocalPool1 _ stripe1@(MkStripe1 striperef)) # t := getLocalPool localpools t
+               realtimenow # t := ioToF1 (runElinIO grabRealTime) t
              in case realtimenow of
                   Left realtimenowerr =>
                     let newerrors := [ MkResourcePoolError "Data.Pool.tryTakeResource" (show realtimenowerr) Nothing
@@ -1358,13 +1379,14 @@ tryWithResource :  {n : Nat}
                 -> Pool1 World n a
                 -> (a -> IO r)
                 -> F1 World (Either () (Maybe r))
-tryWithResource pool f t =
+tryWithResource pool@(MkPool1 _ localpools) f t =
   let res # t := ioToF1 (runElinIO (tryWithResource' pool f)) t
     in case res of
          Right res' =>
            Right res' # t
          Left err   =>
-           let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
+           let lp@(MkLocalPool1 _ stripe1@(MkStripe1 striperef)) # t := getLocalPool localpools t
+               realtimenow # t := ioToF1 (runElinIO grabRealTime) t
              in case realtimenow of
                   Left realtimenowerr =>
                     let newerrors := [ MkResourcePoolError "Data.Pool.tryWithResource" (show realtimenowerr) Nothing
@@ -1390,9 +1412,28 @@ tryWithResource pool f t =
       uncancelable $ \poll => do
         res <- runIO (tryTakeResource pool)
         case res of
-          Nothing                                           =>
-            pure Nothing
-          Just (res', MkLocalPool1 _ (MkStripe1 striperef)) => do
-            res'' <- onAbort (poll $ liftIO $ f res') (runIO (destroyResource (MkStripe1 striperef)))
-            runIO (putResource pool (MkStripe1 striperef) res')
-            pure $ Just res''
+          Left ()    => do
+            realtimenow <- runElinIO grabRealTime
+            case realtimenow of
+              Left realtimenowerr => do
+                let newerrors = [ MkResourcePoolError "Data.Pool.tryWithResource.tryWithResource'" (show realtimenowerr) Nothing
+                                 , MkResourcePoolError "Data.Pool.tryWithResource.tryWithResource'" "Data.Pool.tryTakeResource failed" Nothing
+                                 ]
+                ()            <- update striperef (\(MkStripe available cache queue queuer nextid cancelled errors) =>
+                                                     (MkStripe available cache queue queuer nextid cancelled (errors ++ newerrors), ())
+                                                  )
+                pure Nothing
+              Right realtimenow'  => do
+                let newerrors = [MkResourcePoolError "Data.Pool.tryWithResource.tryWithResource'" "Data.Pool.tryTakeResource failed" (Just realtimenow')]
+                ()            <- update striperef (\(MkStripe available cache queue queuer nextid cancelled errors) =>
+                                                     (MkStripe available cache queue queuer nextid cancelled (errors ++ newerrors), ())
+                                                  )
+                pure Nothing
+          Right res' =>
+            case res' of
+              Nothing                                            =>
+                pure Nothing
+              Just (res'', MkLocalPool1 _ (MkStripe1 striperef)) => do
+                res''' <- onAbort (poll $ liftIO $ f res'') (runIO (destroyResource (MkStripe1 striperef)))
+                runIO (putResource pool (MkStripe1 striperef) res''')
+                pure $ Just res'''
