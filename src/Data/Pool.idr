@@ -324,9 +324,9 @@ newPool numstripes pc@(MkPoolConfig create free cachettl (maxres ** prfmaxres) _
       pools'          # t := saturateLocalPools 0 numstripes striperesources pools t
     in case pools' of
          Left poolerrors =>
-           Left poolerrors # t    
+           Left poolerrors # t
          Right ()        =>
-           Right (MkPool1 pc pools) # t 
+           Right (MkPool1 pc pools) # t
   where
     range :  Nat
           -> Nat
