@@ -30,6 +30,11 @@ record PoolConfig a where
 
 ||| A custom Pool error.
 |||
+||| Fields:
+||| - `fnname`                : The function the error originated from
+||| - `errormessage`          : The error formatted as a String
+||| - `errormessagetimestamp` : The timestamp the error occurred at
+|||
 public export
 record ResourcePoolError where
   constructor MkResourcePoolError
@@ -149,6 +154,7 @@ data Entry : (a : Type) -> Type where
 ||| - `queuer`    : secondary FIFO (amortized append)
 ||| - `nextId`    : fresh waiter id supply
 ||| - `cancelled` : sorted set of cancelled waiter ids
+||| - `errors`    : errors captured during resource pool operation
 |||
 ||| Invariants:
 ||| - Stripe is immutable between CAS updates.
