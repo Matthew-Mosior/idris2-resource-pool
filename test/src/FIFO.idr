@@ -37,22 +37,34 @@ test_fifo = do
                   LTESucc LTEZero))
           "fifo"
   pool <- runIO (newPool 1 cfg)
-  (r, lp@(MkLocalPool1 _ stripe)) <- runIO (takeResource pool)
-  orderref <- newref []
-  starts <- traverse (\_ => makeChannel) [0,1,2,3,4,5,6,7,8,9]
-  for_ (zip [0,1,2,3,4,5,6,7,8,9] starts) $ \(i, start) =>
-    fork $ do
-     channelGet start
-     (r2, _) <- runIO (takeResource pool)
-     runIO (casmod1 orderref (\xs => (xs ++ [i])))
-     runIO (putResource pool stripe r2)
-  -- deterministically enqueue in order
-  for_ starts $ \start => do
-    channelPut start ()
-    usleep 10
-  -- release initial resource
-  runIO (putResource pool stripe r)
-  sleep 1
-  result <- readref orderref
-  when (result /= (the (List Nat) [0,1,2,3,4,5,6,7,8,9])) $
-    assert_total $ idris_crash "out of order: \{show result}"
+  case pool of
+    Left errs   =>
+      die "Error creating new pool"
+    Right pool' => do
+      taker <- runIO (takeResource pool')
+      case taker of
+        Left ()                               =>
+          die "Error calling takeResource"
+        Right (r, lp@(MkLocalPool1 _ stripe)) => do
+          orderref <- newref []
+          starts <- traverse (\_ => makeChannel) [0,1,2,3,4,5,6,7,8,9]
+          for_ (zip [0,1,2,3,4,5,6,7,8,9] starts) $ \(i, start) =>
+            fork $ do
+             channelGet start
+             taker' <- runIO (takeResource pool')
+             case taker' of
+               Left ()       =>
+                 die "Error calling takeResource"
+               Right (r2, _) => do
+                 runIO (casmod1 orderref (\xs => (xs ++ [i])))
+                 runIO (putResource pool' stripe r2)
+          -- deterministically enqueue in order
+          for_ starts $ \start => do
+            channelPut start ()
+            usleep 10
+          -- release initial resource
+          runIO (putResource pool' stripe r)
+          sleep 1
+          result <- readref orderref
+          when (result /= (the (List Nat) [0,1,2,3,4,5,6,7,8,9])) $
+            die "out of order: \{show result}"

@@ -35,13 +35,21 @@ test_stripeLocality = do
                   LTESucc (LTESucc (LTESucc (LTESucc LTEZero)))))
           "locality"
   pool <- runIO (newPool 4 cfg)
-  stripeids <- for [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20] $ \_ => do
-    (r, MkLocalPool1 sid stripe) <- runIO (takeResource pool)
-    runIO (putResource pool stripe r)
-    pure sid
-  case stripeids of
-    []        =>
-      pure ()
-    (x :: xs) =>
-      when (any (/= x) xs) $
-        assert_total $ idris_crash ("stripe locality violated: " ++ show stripeids)
+  case pool of
+    Left errs   =>
+      die "Error creating new pool"
+    Right pool' => do
+      stripeids <- for [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20] $ \_ => do
+        taker <- runIO (takeResource pool')
+        case taker of
+          Left ()                            =>
+            die "Error calling takeResource"
+          Right (r, MkLocalPool1 sid stripe) => do
+            runIO (putResource pool' stripe r)
+            pure sid
+      case stripeids of
+        []        =>
+          pure ()
+        (x :: xs) =>
+          when (any (/= x) xs) $
+            die ("stripe locality violated: " ++ show stripeids)

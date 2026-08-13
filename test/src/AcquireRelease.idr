@@ -5,6 +5,7 @@ import Types
 import Data.Linear.Ref1
 import Data.Nat
 import Data.Pool
+import System
 import System.Posix.Time
 
 export
@@ -28,11 +29,23 @@ test_basicAcquireRelease = do
           (1 ** (LTESucc LTEZero, LTESucc LTEZero))
           "basic"
   pool <- runIO (newPool 1 cfg)
-  runIO $ withResource pool (\_ => pure ())
-  runIO $ withResource pool (\_ => pure ())
-  c <- readref created
-  f <- readref freed
-  when (c /= 1) $
-    assert_total $ idris_crash "test_basicAcquireRelease: expected exactly one created resource"
-  when (f /= 0) $
-    assert_total $ idris_crash "test_basicAcquireRelease: expected zero freed resources"
+  case pool of
+    Left errs   =>
+      die "Error creating new pool"
+    Right pool' => do
+      withr <- runIO $ withResource pool' (\_ => pure ())
+      case withr of
+        Left ()  =>
+          die "Error calling withResource"
+        Right _  => do
+          withr' <- runIO $ withResource pool' (\_ => pure ())
+          case withr' of
+            Left ()  =>
+              die "Error calling withResource"
+            Right _  => do
+              c <- readref created
+              f <- readref freed
+              when (c /= 1) $
+                die "test_basicAcquireRelease: expected exactly one created resource"
+              when (f /= 0) $
+                die "test_basicAcquireRelease: expected zero freed resources"
