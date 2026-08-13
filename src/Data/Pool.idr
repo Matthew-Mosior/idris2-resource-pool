@@ -7,6 +7,7 @@ import Control.Monad.Elin
 import Control.Monad.MCancel
 import Data.Array
 import Data.Array.Mutable
+import Data.Either
 import Data.Linear.Ref1
 import Data.Linear.Traverse1
 import Data.List
@@ -25,7 +26,19 @@ import Syntax.T1
 --          Utilities
 --------------------------------------------------------------------------------
 
+
+||| Grab CLOCK_MONOTONIC.
+|||
+grabMonotonicTime : Elin World [Errno] (IClock CLOCK_MONOTONIC)
+grabMonotonicTime = getTime CLOCK_MONOTONIC
+
+||| Grab CLOCK_REALTIME.
+|||
+grabRealTime : Elin World [Errno] (IClock CLOCK_REALTIME)
+grabRealTime = getTime CLOCK_REALTIME
+
 ||| Cancellation check.
+|||
 isCancelled :  Nat
             -> Queue Nat
             -> Bool
@@ -39,6 +52,7 @@ isCancelled x (QNode y ys) =
       isCancelled x ys
 
 ||| Append a value into the `Queue a`.
+|||
 appendQ :  Queue a
         -> a
         -> Queue a
@@ -47,7 +61,8 @@ appendQ QEnd         x =
 appendQ (QNode y ys) x =
   QNode y (appendQ ys x)
 
-||| Revers a `Queue a`.
+||| Reverse a `Queue a`.
+|||
 reverseQ :  Queue a
          -> Queue a
 reverseQ q =
@@ -62,6 +77,7 @@ reverseQ q =
       go xs (QNode x acc)
 
 ||| Append two `Queue a`.
+|||
 appendAll :  Queue a
           -> Queue a
           -> Queue a
@@ -71,6 +87,7 @@ appendAll (QNode x xs) ys =
   QNode x (appendAll xs ys)
 
 ||| Normalize two `Queue Waiter`s.
+|||
 normalize :  Queue (Waiter a)
           -> Queue (Waiter a)
           -> Queue (Waiter a)
@@ -80,6 +97,7 @@ normalize q1   q2 =
   appendAll q1 q2
 
 ||| Dequeue first live waiter.
+|||
 dequeueLive :  Queue (Waiter a)
             -> SortedSet Nat
             -> (Maybe (Waiter a), Queue (Waiter a), SortedSet Nat)
@@ -96,18 +114,20 @@ dequeueLive (QNode w@(MkWaiter id wake) rest) cancelled =
       (Just w, rest, cancelled)
 
 ||| Stripe-level dequeue.
+|||
 dequeueStripe :  Stripe a
               -> (Maybe (Waiter a), Stripe a)
-dequeueStripe (MkStripe available cache queue queuer nextid cancelled) =
+dequeueStripe (MkStripe available cache queue queuer nextid cancelled errors) =
   let fullq                  = normalize queue queuer
       (mw, rest, cancelled') = dequeueLive fullq cancelled
     in case mw of
          Nothing =>
-           (Nothing, MkStripe available cache QEnd QEnd nextid cancelled')
+           (Nothing, MkStripe available cache QEnd QEnd nextid cancelled' errors)
          Just w  =>
-           (Just w, MkStripe available cache rest QEnd nextid cancelled')
+           (Just w, MkStripe available cache rest QEnd nextid cancelled' errors)
 
 ||| Check to see if entry is stale.
+|||
 isStale :  Clock Duration
         -> IClock CLOCK_MONOTONIC
         -> Entry a
@@ -128,34 +148,49 @@ export
 runEffects :  Stripe1 World a
            -> List (StripeEffect a)
            -> F1' World
-runEffects mstripe effects t =
-  traverse1_ (runEffect mstripe) effects t
+runEffects (MkStripe1 striperef) effects t =
+  let effects' # t := traverse1 (runEffect (MkStripe1 striperef)) effects t
+      effectserrs  := lefts effects'
+    in case effectserrs of
+         []           =>
+           () # t
+         effectserrs' =>
+           casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled errors) =>
+                                   (MkStripe available cache queue queuer nextid cancelled (errors ++ (concat effectserrs')), ())
+                                ) t
   where
-    grabTime : Elin World [Errno] (IClock CLOCK_MONOTONIC)
-    grabTime = getTime CLOCK_MONOTONIC
     runEffect :  Stripe1 World a
               -> StripeEffect a
-              -> F1' World
+              -> F1 World (Either (List ResourcePoolError) ())
     runEffect _                     None                      t =
-      () # t
+      Right () # t
     runEffect _                     (Wake ch val)             t =
-      ioToF1 (channelPut ch val) t
+      let () # t := ioToF1 (channelPut ch val) t
+        in Right () # t
     runEffect _                     (WakeMany pairs)          t =
-      traverse1_ (\(ch,val) => ioToF1 (channelPut ch val))
-                 pairs
-                 t
+      let () # t := traverse1_ (\(ch,val) => ioToF1 (channelPut ch val)) pairs t
+        in Right () # t
     runEffect _                     (FreeMany free xs)        t =
-      traverse1_ (\x => ioToF1 (free x)) xs t
+      let () # t := traverse1_ (\x => ioToF1 (free x)) xs t
+        in Right () # t
     runEffect (MkStripe1 striperef) (InsertWithTimestamp val) t =
-      let now # t := ioToF1 (runElinIO grabTime) t
-        in case now of
-             Left err   =>
-               (assert_total $ idris_crash "Data.Pool.runEffects.runEffect: \{show err}") # t
-             Right now' =>
-               let entry := MkEntry val now'
-                 in casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled) =>
-                                            (MkStripe available (entry :: cache) queue queuer nextid cancelled, ())
-                                         ) t
+      let monotonicnow # t := ioToF1 (runElinIO grabMonotonicTime) t
+        in case monotonicnow of
+             Left monotonicnowerr =>
+               let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
+                 in case realtimenow of
+                      Left realtimenowerr =>
+                        Left [ MkResourcePoolError "Data.Pool.runEffects.runEffect" (show monotonicnowerr) Nothing
+                             , MkResourcePoolError "Data.Pool.runEffects.runEffect" (show realtimenowerr) Nothing
+                             ] # t
+                      Right realtimenow'  =>
+                        Left [MkResourcePoolError "Data.Pool.runEffects.runEffect" (show monotonicnowerr) (Just realtimenow')] # t
+             Right monotonicnow'  =>
+               let entry  := MkEntry val monotonicnow'
+                   () # t := casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled errors) =>
+                                                     (MkStripe available (entry :: cache) queue queuer nextid cancelled errors, ())
+                                                  ) t
+                 in Right () # t
 
 ||| Atomically apply a `Stripe a` transition and execute its effects.
 |||
@@ -280,15 +315,19 @@ setPoolLabel label pc =
 export
 newPool :  (numstripes : Nat)
         -> PoolConfig a
-        -> F1 World (Pool1 World numstripes a)
+        -> F1 World (Either (List ResourcePoolError) (Pool1 World numstripes a))
 newPool numstripes pc@(MkPoolConfig create free cachettl (maxres ** prfmaxres) _ pclabel) t =
   let striperesources     := let base = div maxres numstripes
                                  rest = mod maxres numstripes
                                in zip (range Z numstripes)
                                       (distribute base rest numstripes)
       pools           # t := unsafeMArray1 numstripes t
-      ()              # t := saturateLocalPools 0 numstripes striperesources pools t
-    in MkPool1 pc pools # t 
+      pools'          # t := saturateLocalPools 0 numstripes striperesources pools t
+    in case pools' of
+         Left poolerrors =>
+           Left poolerrors # t    
+         Right ()        =>
+           Right (MkPool1 pc pools) # t 
   where
     range :  Nat
           -> Nat
@@ -312,13 +351,20 @@ newPool numstripes pc@(MkPoolConfig create free cachettl (maxres ** prfmaxres) _
                        -> {auto 0 prf : LTE o $ ixToNat v}
                        -> (resources : List (Nat, Nat))
                        -> (arr : MArray World numstripes (LocalPool1 World a))
-                       -> F1' World
+                       -> F1 World (Either (List ResourcePoolError) ())
     saturateLocalPools o Z     _         _   t =
-      () # t
+      Right () # t
     saturateLocalPools o (S j) resources arr t =
       case lookup j resources of
         Nothing       =>
-          (assert_total $ idris_crash "Data.Pool.newPool: impossible index") # t
+          let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
+            in case realtimenow of
+                 Left realtimenowerr =>
+                   Left [ MkResourcePoolError "Data.Pool.newPool.saturatePools" (show realtimenowerr) Nothing
+                        , MkResourcePoolError "Data.Pool.newPool.saturatePools" "impossible index" Nothing
+                        ] # t
+                 Right realtimenow'  =>
+                   Left [MkResourcePoolError "Data.Pool.newPool.saturatePools" "impossible index" (Just realtimenow')] # t
         Just resource =>
           let striperef  # t := ref1 ( MkStripe resource
                                                 []
@@ -326,12 +372,20 @@ newPool numstripes pc@(MkPoolConfig create free cachettl (maxres ** prfmaxres) _
                                                 QEnd
                                                 0
                                                 empty
+                                                []
                                      ) t
               striperef1     := MkStripe1 striperef
               localpool      := MkLocalPool1 j striperef1
             in case tryNatToFin j of
                  Nothing =>
-                   (assert_total $ idris_crash "Data.Pool.newPool.saturatePools: couldn't convert Nat to Fin") # t
+                   let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
+                     in case realtimenow of
+                          Left realtimenowerr =>
+                            Left [ MkResourcePoolError "Data.Pool.newPool.saturatePools" (show realtimenowerr) Nothing
+                                 , MkResourcePoolError "Data.Pool.newPool.saturatePools" "couldn't convert Nat to Fin" Nothing
+                                 ] # t
+                          Right realtimenow'  =>
+                            Left [MkResourcePoolError "Data.Pool.newPool.saturatePools" "couldn't convert Nat to Fin" (Just realtimenow')] # t
                  Just j' =>
                    let () # t := set arr j' localpool t
                      in saturateLocalPools o j resources arr t
@@ -474,23 +528,23 @@ export
 signal :  Stripe a
        -> WakeResult a
        -> StripeStep a
-signal stripe@(MkStripe available cache queue queuer nextid cancelled) result =
-  let (mw, MkStripe available' cache' queue' queuer' nextid' cancelled') = dequeueStripe stripe
+signal stripe@(MkStripe available cache queue queuer nextid cancelled errors) result =
+  let (mw, MkStripe available' cache' queue' queuer' nextid' cancelled' errors') = dequeueStripe stripe
     in case mw of
          -- no waiting thread
          Nothing =>
            case result of
              Deliver val            =>
-               MkStripeStep (MkStripe (S available') cache' queue' queuer' nextid' cancelled')
+               MkStripeStep (MkStripe (S available') cache' queue' queuer' nextid' cancelled' errors')
                             [InsertWithTimestamp val]
              Create                 =>
-               MkStripeStep (MkStripe available' cache' queue' queuer' nextid' cancelled')
+               MkStripeStep (MkStripe available' cache' queue' queuer' nextid' cancelled' errors')
                             [None]
              Cancelled              =>
-               MkStripeStep (MkStripe available' cache' queue' queuer' nextid' cancelled')
+               MkStripeStep (MkStripe available' cache' queue' queuer' nextid' cancelled' errors')
                             [None]
          Just (MkWaiter _ wake) =>
-           MkStripeStep (MkStripe available' cache' queue' queuer' nextid' cancelled')
+           MkStripeStep (MkStripe available' cache' queue' queuer' nextid' cancelled' errors')
                         [Wake wake result]
 
 ||| Block until a resource is delivered to this waiter.
@@ -528,23 +582,38 @@ signal stripe@(MkStripe available cache queue queuer nextid cancelled) result =
 |||
 export
 waitForResource :  Stripe1 World a
-                -> Nat               -- waiter id
+                -> Nat                    -- waiter id
                 -> Channel (WakeResult a) -- wake channel
-                -> F1 World (WakeResult a)
-waitForResource mstripe wid wake t =
-  let res # t := ioToF1 (runElinIO (waitForResource' mstripe wid wake)) t
+                -> F1 World (Either () (WakeResult a))
+waitForResource (MkStripe1 striperef) wid wake t =
+  let res # t := ioToF1 (runElinIO (waitForResource' (MkStripe1 striperef) wid wake)) t
     in case res of
          Right res' =>
-           res' # t
+           Right res' # t
          Left err   =>
-           (assert_total $ idris_crash "Data.Pool.waitForResource: \{show err}") # t
+            let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
+              in case realtimenow of
+                   Left realtimenowerr =>
+                     let newerrors := [ MkResourcePoolError "Data.Pool.waitForResource" (show realtimenowerr) Nothing
+                                      , MkResourcePoolError "Data.Pool.waitForResource" (show err) Nothing
+                                      ]
+                         ()    # t := casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled errors) =>
+                                                              (MkStripe available cache queue queuer nextid cancelled (errors ++ newerrors), ())
+                                                           ) t
+                       in Left () # t
+                   Right realtimenow'  =>
+                     let newerrors := [MkResourcePoolError "Data.Pool.waitForResource" (show err) (Just realtimenow')]
+                         ()    # t := casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled errors) =>
+                                                              (MkStripe available cache queue queuer nextid cancelled (errors ++ newerrors), ())
+                                                           ) t
+                       in Left () # t
   where
     cleanup :   Stripe1 World a
              -> Nat
              -> F1' World
     cleanup (MkStripe1 mstripe) wid t =
-      casupdate1 mstripe (\(MkStripe available cache queue queuer nextid cancelled) =>
-                           (MkStripe available cache queue queuer nextid (insert wid cancelled), ())
+      casupdate1 mstripe (\(MkStripe available cache queue queuer nextid cancelled errors) =>
+                           (MkStripe available cache queue queuer nextid (insert wid cancelled) errors, ())
                          ) t
     waitForResource'' :  Channel (WakeResult a)
                       -> F1 World (WakeResult a)
@@ -574,10 +643,25 @@ destroyResource :  Stripe1 World a
 destroyResource (MkStripe1 striperef) t =
   let res # t := ioToF1 (runElinIO (destroy (MkStripe1 striperef))) t
     in case res of
-         Right _  =>
-           () # t
-         Left err =>
-           (assert_total $ idris_crash "Data.Pool.destroyResource: \{show err}") # t
+         Right res' =>
+           res' # t
+         Left err   =>
+            let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
+              in case realtimenow of
+                   Left realtimenowerr =>
+                     let newerrors := [ MkResourcePoolError "Data.Pool.destroyResource" (show realtimenowerr) Nothing
+                                      , MkResourcePoolError "Data.Pool.destroyResource" (show err) Nothing
+                                      ]
+                         ()    # t := casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled errors) =>
+                                                              (MkStripe available cache queue queuer nextid cancelled (errors ++ newerrors), ())
+                                                           ) t
+                       in () # t
+                   Right realtimenow'  =>
+                     let newerrors := [MkResourcePoolError "Data.Pool.destroyResource" (show err) (Just realtimenow')]
+                         ()    # t := casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled errors) =>
+                                                              (MkStripe available cache queue queuer nextid cancelled (errors ++ newerrors), ())
+                                                           ) t
+                       in () # t
   where
     destroy' :  Stripe1 World a
              -> F1' World
@@ -606,14 +690,14 @@ private
 cleanStripe :  (Entry a -> Bool)
             -> (a -> IO ())
             -> Stripe1 World a
-            -> F1' World
+            -> F1 World (Maybe (List ResourcePoolError))
 cleanStripe isstale free (MkStripe1 striperef) t =
   let res # t := ioToF1 (runElinIO (cleanStripe' (MkStripe1 striperef))) t
     in case res of
-         Right _  =>
-           () # t
-         Left err =>
-           (assert_total $ idris_crash "Data.Pool.cleanStripe: \{show err}") # t
+         Right res' =>
+           res' # t
+         Left err   =>
+           Just [MkResourcePoolError (show err)] # t
   where
     step :  Stripe a
          -> StripeStep a
@@ -629,12 +713,12 @@ cleanStripe isstale free (MkStripe1 striperef) t =
                    [FreeMany free xs]
              )
     cleanStripe'' :  Stripe1 World a
-                  -> F1' World
+                  -> F1 World (Maybe (List ResourcePoolError))
     cleanStripe'' (MkStripe1 striperef) t =
       casWithEffects (MkStripe1 striperef) step t
     cleanStripe' :  MCancel (Elin World)
                  => Stripe1 World a
-                 -> Elin World [Errno] ()
+                 -> Elin World [Errno] (Maybe (List ResourcePoolError))
     cleanStripe' (MkStripe1 striperef) =
       uncancelable $ \_ =>
         runIO (cleanStripe'' (MkStripe1 striperef))
@@ -706,12 +790,12 @@ private
 cleanStripeIfNeeded :  (ttl : Clock Duration)
                     -> (free : a -> IO ())
                     -> Stripe1 World a
-                    -> F1' World
+                    -> F1 World (Maybe (List ResourcePoolError))
 cleanStripeIfNeeded ttl free (MkStripe1 striperef) t =
   let now # t := ioToF1 (runElinIO grabTime) t
     in case now of
          Left err   =>
-           (assert_total $ idris_crash "Data.Pool.cleanStripeIfNeeded: \{show err}") # t
+           Just [MkResourcePoolError (show err)] # t
          Right now' =>
            cleanStripe (isStale ttl now') free (MkStripe1 striperef) t
   where    
@@ -732,10 +816,11 @@ export
 putResource :  Pool1 World n a
             -> Stripe1 World a
             -> a
-            -> F1' World
+            -> F1 World (Maybe (List ResourcePoolError))
 putResource (MkPool1 (MkPoolConfig _ free ttl _ _ _) _) (MkStripe1 striperef) val t =
-  let () # t := cleanStripeIfNeeded ttl free (MkStripe1 striperef) t
-    in casWithEffects (MkStripe1 striperef) (\stripe => signal stripe (Deliver val)) t
+  let stripecleanerrs # t := cleanStripeIfNeeded ttl free (MkStripe1 striperef) t
+      caserrs         # t := casWithEffects (MkStripe1 striperef) (\stripe => signal stripe (Deliver val)) t
+    in (stripecleanerrs <+> caserrs) # t
 
 ||| Destroy all resources in all stripes in the `Pool1 World n a`.
 |||
@@ -757,21 +842,23 @@ export
 destroyAllResources :  {n : Nat}
                     -> Pool1 World n a
                     -> MArray World n (LocalPool1 World a)
-                    -> F1' World
+                    -> F1 World (Maybe (List ResourcePoolError))
 destroyAllResources (MkPool1 (MkPoolConfig _ freeresource _ _ _ _) _) localpools t =
-  go 0 n localpools t
+  let liststripecleanerrs # t := go 0 n localpools Lin t
+    in Just (concat (catMaybes liststripecleanerrs)) # t
   where
     go :  (o, x : Nat)
        -> {auto v : Ix x n}
        -> {auto 0 prf : LTE o $ ixToNat v}
        -> (arr : MArray World n (LocalPool1 World a))
-       -> F1' World
-    go o Z     _   t =
-      () # t
-    go o (S j) arr t =
+       -> (scesl : SnocList (Maybe (List ResourcePoolError)))
+       -> F1 World (List (Maybe (List ResourcePoolError)))
+    go o Z     _   scesl t =
+      (scesl <>> []) # t
+    go o (S j) arr scesl t =
       let MkLocalPool1 _ stripe1 # t := getIx arr j t
-          ()                     # t := cleanStripe (const True) freeresource stripe1 t
-        in go o j arr t
+          stripecleanerrs        # t := cleanStripe (const True) freeresource stripe1 t
+        in go o j arr (scesl :< stripecleanerrs) t
 
 ||| Restore one unit of available capacity in the `Stripe a`.
 |||
@@ -789,7 +876,7 @@ destroyAllResources (MkPool1 (MkPoolConfig _ freeresource _ _ _ _) _) localpools
 |||
 export
 restoreSize :  Stripe1 World a
-            -> F1' World
+            -> F1 World (Maybe (List ResourcePoolError))
 restoreSize (MkStripe1 striperef) t =
   casWithEffects (MkStripe1 striperef) step t
   where
