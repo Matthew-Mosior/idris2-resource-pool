@@ -33,7 +33,7 @@ test_destroyAllResources = do
   case pool of
     Left errs   =>
       die "Error creating new pool"
-    Right pool'@(MkPool1 _ pools) => do
+    Right pool'@(MkPool1 _ pools _) => do
       -- create + cache one resource
       withr <- runIO $ withResource pool' (\_ => pure ())
       case withr of
