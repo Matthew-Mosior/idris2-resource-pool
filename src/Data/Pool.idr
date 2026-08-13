@@ -459,25 +459,65 @@ newPool numstripes pc@(MkPoolConfig create free cachettl (maxres ** prfmaxres) _
 private
 getLocalPool :  {n : Nat}
              -> MArray World n (LocalPool1 World a)
-             -> F1 World (LocalPool1 World a)
+             -> F1 World (Maybe (LocalPool1 World a))
 getLocalPool pools t =
   case n == 1 of
     True  =>
       let sid  := 0
           sid' := remInt sid (cast {to=Int} n)
-        in case tryNatToFin (cast {to=Nat} sid') of
+        in case sid' of
              Nothing    =>
-               (assert_total $ idris_crash "Data.Pool.getLocalPool: couldn't convert Nat to Fin") # t
+               Nothing # t
              Just sid'' =>
-               get pools sid'' t
+               case tryNatToFin (cast {to=Nat} sid'') of
+                 Nothing     =>
+                   let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
+                     in case realtimenow of
+                          Left realtimenowerr =>
+                            let newerrors := [ MkResourcePoolError "Data.Pool.getLocalPool" (show realtimenowerr) Nothing
+                                             , MkResourcePoolError "Data.Pool.getLocalPool" "couldn't convert Nat to Fin" Nothing
+                                             ]
+                                ()    # t := casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled errors) =>
+                                                                     (MkStripe available cache queue queuer nextid cancelled (errors ++ newerrors), ())
+                                                                  ) t
+                              in Nothing # t
+                          Right realtimenow'  =>
+                            let newerrors := [MkResourcePoolError "Data.Pool.getLocalPool" "couldn't convert Nat to Fin" (Just realtimenow')]
+                                ()    # t := casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled errors) =>
+                                                                     (MkStripe available cache queue queuer nextid cancelled (errors ++ newerrors), ())
+                                                                  ) t
+                              in Nothing # t
+                 Just sid''' =>
+                   let sid'''' # t := get pools sid''' t
+                     in Just sid'''' # t
     False =>
       let sid # t := ioToF1 getThreadId t
           sid'    := remInt sid (cast {to=Int} n)
-        in case tryNatToFin (cast {to=Nat} sid') of
+        in case sid' of
              Nothing    =>
-               (assert_total $ idris_crash "Data.Pool.getLocalPool: couldn't convert Nat to Fin") # t
+               Nothing # t
              Just sid'' =>
-               get pools sid'' t
+               case tryNatToFin (cast {to=Nat} sid'') of
+                 Nothing     =>
+                   let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
+                     in case realtimenow of
+                          Left realtimenowerr =>
+                            let newerrors := [ MkResourcePoolError "Data.Pool.getLocalPool" (show realtimenowerr) Nothing
+                                             , MkResourcePoolError "Data.Pool.getLocalPool" "couldn't convert Nat to Fin" Nothing
+                                             ]
+                                ()    # t := casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled errors) =>
+                                                                     (MkStripe available cache queue queuer nextid cancelled (errors ++ newerrors), ())
+                                                                  ) t
+                              in Nothing # t
+                          Right realtimenow'  =>
+                            let newerrors := [MkResourcePoolError "Data.Pool.getLocalPool" "couldn't convert Nat to Fin" (Just realtimenow')]
+                                ()    # t := casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled errors) =>
+                                                                     (MkStripe available cache queue queuer nextid cancelled (errors ++ newerrors), ())
+                                                                  ) t
+                              in Nothing # t
+                 Just sid''' =>
+                   let sid'''' # t := get pools sid''' t
+                     in Just sid'''' # t
   where
     signumInt :  Int
               -> Int
@@ -504,13 +544,13 @@ getLocalPool pools t =
                q
     remInt :  Int
            -> Int
-           -> Int
+           -> Maybe Int
     remInt x y =
       case y == 0 of
         True  =>
-          assert_total $ idris_crash "division by zero"
+          Nothing
         False =>
-          x - (quotInt x y) * y
+          Just $ x - (quotInt x y) * y
 
 ||| Deliver a value to a `Stripe a` state.
 |||
