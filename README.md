@@ -44,7 +44,7 @@ data Stripe a where
            -> (queuer : Queue (Waiter a))
            -> (nextid : Nat)
            -> (cancelled : SortedSet Nat)
-           -> (errors : List ResourcePoolError)
+           -> (errors : List StripeError)
            -> Stripe a
 ```
 
