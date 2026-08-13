@@ -44,25 +44,37 @@ test_idleCleanup = do
                   LTESucc LTEZero))
           "idle-cleanup"
   pool <- runIO (newPool 1 cfg)
-  -- create + cache resource
-  runIO (withResource pool (\_ => pure ()))
-  c1 <- readref stats.created
-  f1 <- readref stats.freed
-  when (c1 /= 1) $
-    assert_total $
-      idris_crash "expected one created resource"
-  when (f1 /= 0) $
-    assert_total $
-      idris_crash "expected zero freed resources"
-  -- wait beyond TTL
-  usleep 300000
-  -- trigger cleanup path
-  runIO (withResource pool (\_ => pure ()))
-  c2 <- readref stats.created
-  f2 <- readref stats.freed
-  -- old resource should have been evicted
-  when (f2 /= 1) $
-    assert_total $ idris_crash "expected one freed idle resource"
-  -- new resource should have been created
-  when (c2 /= 2) $
-    assert_total $ idris_crash "expected resource recreation after idle cleanup"
+  case pool of
+    Left errs   =>
+      die "Error creating new pool"
+    Right pool' => do
+      -- create + cache resource
+      withr <- runIO (withResource pool' (\_ => pure ()))
+      case withr of
+        Left () =>
+          die "Error calling withResource"
+        Right _ => do
+          c1 <- readref stats.created
+          f1 <- readref stats.freed
+          when (c1 /= 1) $
+            assert_total $
+              idris_crash "expected one created resource"
+          when (f1 /= 0) $
+            assert_total $
+              idris_crash "expected zero freed resources"
+          -- wait beyond TTL
+          usleep 300000
+          -- trigger cleanup path
+          withr' <- runIO (withResource pool' (\_ => pure ()))
+          case withr' of
+            Left () =>
+              die "Error calling withResource"
+            Right _ => do
+              c2 <- readref stats.created
+              f2 <- readref stats.freed
+              -- old resource should have been evicted
+              when (f2 /= 1) $
+                die "expected one freed idle resource"
+              -- new resource should have been created
+              when (c2 /= 2) $
+                die "expected resource recreation after idle cleanup"

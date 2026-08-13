@@ -10,8 +10,6 @@ import System.Concurrency
 import System.Posix.Timer
 import System.Posix.Timer.Prim
 
-%language ElabReflection
-
 %default total
 
 ||| Configuration of a Pool.
@@ -29,6 +27,37 @@ record PoolConfig a where
   poolmaxresources : (maxres ** LTE 1 maxres)
   poolnumstripes   : (n ** (LTE 1 n, LTE n (fst poolmaxresources)))
   poolconfiglabel  : String
+
+||| A custom Pool error.
+|||
+||| Fields:
+||| - `fnname`                : The function the error originated from
+||| - `errormessage`          : The error formatted as a String
+||| - `errormessagetimestamp` : The timestamp the error occurred at
+|||
+public export
+record ResourcePoolError where
+  constructor MkResourcePoolError
+  fnname                : String
+  errormessage          : String
+  errormessagetimestamp : Maybe (IClock CLOCK_REALTIME)
+
+public export
+Show ResourcePoolError where
+  show (MkResourcePoolError fnname errormessage (Just errormessagetimestamp)) =
+    "MkResourcePoolError " ++
+    fnname                 ++
+    " "                    ++
+    errormessage           ++
+    " "                    ++
+    (asctime $ fromUTC errormessagetimestamp)
+  show (MkResourcePoolError fnname errormessage Nothing)                      =
+    "MkResourcePoolError " ++
+    fnname                 ++
+    " "                    ++
+    errormessage           ++
+    " "                    ++
+    "IClock CLOCK_REALTIME"
 
 ||| A simple (persistent) FIFO queue.
 |||
@@ -104,7 +133,7 @@ data Waiter : (a : Type) -> Type where
 |||
 public export
 data Entry : (a : Type) -> Type where
-  MkEntry :  (entry : a)
+  MkEntry :  (entry    : a)
           -> (lastused : IClock CLOCK_MONOTONIC)
           -> Entry a
 
@@ -125,6 +154,7 @@ data Entry : (a : Type) -> Type where
 ||| - `queuer`    : secondary FIFO (amortized append)
 ||| - `nextId`    : fresh waiter id supply
 ||| - `cancelled` : sorted set of cancelled waiter ids
+||| - `errors`    : errors captured during resource pool operation
 |||
 ||| Invariants:
 ||| - Stripe is immutable between CAS updates.
@@ -134,11 +164,12 @@ data Entry : (a : Type) -> Type where
 public export
 data Stripe : (a : Type) -> Type where
   MkStripe :  (available : Nat)
-           -> (cache : List (Entry a))
-           -> (queue : Queue (Waiter a))
-           -> (queuer : Queue (Waiter a))
-           -> (nextid : Nat)
+           -> (cache     : List (Entry a))
+           -> (queue     : Queue (Waiter a))
+           -> (queuer    : Queue (Waiter a))
+           -> (nextid    : Nat)
            -> (cancelled : SortedSet Nat)
+           -> (errors    : List ResourcePoolError)
            -> Stripe a
 
 ||| A linear mutable stripe.
@@ -187,7 +218,7 @@ record StripeStep a where
 |||
 public export
 data LocalPool1 : (s : Type) -> (a : Type) -> Type where
-  MkLocalPool1 :  (stripeid : Nat)
+  MkLocalPool1 :  (stripeid  : Nat)
                -> (stripevar : Stripe1 s a)
                -> LocalPool1 s a
 

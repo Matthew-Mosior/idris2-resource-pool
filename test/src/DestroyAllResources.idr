@@ -5,6 +5,7 @@ import Types
 import Data.Linear.Ref1
 import Data.Nat
 import Data.Pool
+import System
 import System.Posix.Time
 
 export
@@ -28,17 +29,33 @@ test_destroyAllResources = do
           (2 ** LTESucc LTEZero)
           (1 ** (LTESucc LTEZero, LTESucc LTEZero))
           "destroy"
-  pool@(MkPool1 _ pools) <- runIO (newPool 1 cfg)
-  -- create + cache one resource
-  runIO $ withResource pool (\_ => pure ())
-  runIO $ withResource pool (\_ => pure ())
-  -- destroy idle cache
-  runIO $ destroyAllResources pool pools
-  -- must still work afterwards
-  runIO $ withResource pool (\_ => pure ())
-  c <- readref created
-  f <- readref freed
-  when (c /= 2) $
-    assert_total $ idris_crash "expected resource recreation after destroy"
-  when (f /= 1) $
-    assert_total $ idris_crash "expected exactly one freed resource"
+  pool <- runIO (newPool 1 cfg)
+  case pool of
+    Left errs   =>
+      die "Error creating new pool"
+    Right pool'@(MkPool1 _ pools) => do
+      -- create + cache one resource
+      withr <- runIO $ withResource pool' (\_ => pure ())
+      case withr of
+        Left ()  =>
+          die "Error calling withResource"
+        Right _  => do
+          withr' <- runIO $ withResource pool' (\_ => pure ())
+          case withr' of
+            Left ()  =>
+              die "Error calling withResource"
+            Right _  => do
+              -- destroy idle cache
+              runIO $ destroyAllResources pool' pools
+              -- must still work afterwards
+              withr'' <- runIO $ withResource pool' (\_ => pure ())
+              case withr'' of
+                Left ()  =>
+                  die "Error calling withResource"
+                Right _  => do
+                  c <- readref created
+                  f <- readref freed
+                  when (c /= 2) $
+                    die "expected resource recreation after destroy"
+                  when (f /= 1) $
+                    die "expected exactly one freed resource"

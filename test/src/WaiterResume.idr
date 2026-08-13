@@ -35,30 +35,44 @@ test_waiterResume = do
                   LTESucc LTEZero))
           "waiter-resume"
   pool <- runIO (newPool 1 cfg)
-  thread1done <- newref False
-  thread2done <- newref False
-  tid1 <-
-    fork $ do
-      runIO $
-        withResource pool $ \_ => do
-          usleep 300000
-      writeref thread1done True
-  -- ensure thread1 acquires first
-  usleep 50000
-  tid2 <-
-    fork $ do
-      runIO $
-        withResource pool $ \_ => do
-          pure ()
-      writeref thread2done True
-  threadWait tid1
-  threadWait tid2
-  d1 <- readref thread1done
-  d2 <- readref thread2done
-  created <- readref stats.created
-  when (d1 /= True) $
-    assert_total $ idris_crash "thread1 did not finish"
-  when (d2 /= True) $
-    assert_total $ idris_crash "thread2 did not resume"
-  when (created /= 1) $
-    assert_total $ idris_crash "expected exactly one created resource"
+  case pool of
+    Left errs   =>
+      die "Error creating new pool"
+    Right pool' => do
+      thread1done <- newref False
+      thread2done <- newref False
+      tid1 <-
+        fork $ do
+          withr <-
+            runIO $
+              withResource pool' $ \_ => do
+                usleep 300000
+          case withr of
+            Left () =>
+              die "Error calling withResource"
+            Right _ =>
+              writeref thread1done True
+      -- ensure thread1 acquires first
+      usleep 50000
+      tid2 <-
+        fork $ do
+          withr <-
+            runIO $
+              withResource pool' $ \_ => do
+                pure ()
+          case withr of
+            Left () =>
+              die "Error calling withResource"
+            Right _ =>
+              writeref thread2done True
+      threadWait tid1
+      threadWait tid2
+      d1 <- readref thread1done
+      d2 <- readref thread2done
+      created <- readref stats.created
+      when (d1 /= True) $
+        die "thread1 did not finish"
+      when (d2 /= True) $
+        die "thread2 did not resume"
+      when (created /= 1) $
+        die "expected exactly one created resource"

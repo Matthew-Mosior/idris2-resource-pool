@@ -52,20 +52,28 @@ test_maxResourcesBound = do
                   LTESucc (LTESucc LTEZero)))
           "bound"
   pool <- runIO (newPool 2 cfg)
-  tids <- for (replicate 50 ()) $ \n =>
-            fork $ do
-              runIO $
-                withResource pool $ \_ => do
-                  resourceEnter stats
-                  usleep 10000
-                  resourceExit stats
-  for_ tids $ \tid =>
-    threadWait tid
-  peak <- readref stats.maxseen
-  totalresources <- readref stats.created
-  when (peak > 4) $
-    assert_total $
-      idris_crash ("resource limit exceeded: " ++ show peak)
-  when (totalresources > 4) $
-    assert_total $
-      idris_crash ("created too many resources: " ++ show totalresources)
+  case pool of
+    Left errs   =>
+      die "Error creating new pool"
+    Right pool' => do
+      tids <- for (replicate 50 ()) $ \n =>
+                fork $ do
+                  withr <-
+                    runIO $
+                      withResource pool' $ \_ => do
+                        resourceEnter stats
+                        usleep 10000
+                        resourceExit stats
+                  case withr of
+                    Left () =>
+                      die "Error calling withResource"
+                    Right _ =>
+                      pure ()
+      for_ tids $ \tid =>
+        threadWait tid
+      peak <- readref stats.maxseen
+      totalresources <- readref stats.created
+      when (peak > 4) $
+        die ("resource limit exceeded: " ++ show peak)
+      when (totalresources > 4) $
+        die ("created too many resources: " ++ show totalresources)
