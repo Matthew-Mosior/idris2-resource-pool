@@ -28,37 +28,6 @@ record PoolConfig a where
   poolnumstripes   : (n ** (LTE 1 n, LTE n (fst poolmaxresources)))
   poolconfiglabel  : String
 
-||| A custom Pool error.
-|||
-||| Fields:
-||| - `fnname`                : The function the error originated from
-||| - `errormessage`          : The error formatted as a String
-||| - `errormessagetimestamp` : The timestamp the error occurred at
-|||
-public export
-record ResourcePoolError where
-  constructor MkResourcePoolError
-  fnname                : String
-  errormessage          : String
-  errormessagetimestamp : Maybe (IClock CLOCK_REALTIME)
-
-public export
-Show ResourcePoolError where
-  show (MkResourcePoolError fnname errormessage (Just errormessagetimestamp)) =
-    "MkResourcePoolError " ++
-    fnname                 ++
-    " "                    ++
-    errormessage           ++
-    " "                    ++
-    (asctime $ fromUTC errormessagetimestamp)
-  show (MkResourcePoolError fnname errormessage Nothing)                      =
-    "MkResourcePoolError " ++
-    fnname                 ++
-    " "                    ++
-    errormessage           ++
-    " "                    ++
-    "IClock CLOCK_REALTIME"
-
 ||| A simple (persistent) FIFO queue.
 |||
 ||| This is used to maintain an ordered collection of waiting threads.
@@ -137,6 +106,37 @@ data Entry : (a : Type) -> Type where
           -> (lastused : IClock CLOCK_MONOTONIC)
           -> Entry a
 
+||| A Stripe error.
+|||
+||| Fields:
+||| - `fnname`                : The function the error originated from
+||| - `errormessage`          : The error formatted as a String
+||| - `errormessagetimestamp` : The timestamp the error occurred at
+|||
+public export
+record StripeError where
+  constructor MkStripeError
+  fnname                : String
+  errormessage          : String
+  errormessagetimestamp : Maybe (IClock CLOCK_REALTIME)
+
+public export
+Show StripeError where
+  show (MkStripeError fnname errormessage (Just errormessagetimestamp)) =
+    "MkStripeError " ++
+    fnname           ++
+    " "              ++
+    errormessage     ++
+    " "              ++
+    (asctime $ fromUTC errormessagetimestamp)
+  show (MkStripeError fnname errormessage Nothing)                      =
+    "MkStripeError " ++
+    fnname           ++
+    " "              ++
+    errormessage     ++
+    " "              ++
+    "IClock CLOCK_REALTIME"
+
 ||| Stripe is the only concurrent state machine in the system.
 |||
 ||| It owns:
@@ -169,7 +169,7 @@ data Stripe : (a : Type) -> Type where
            -> (queuer    : Queue (Waiter a))
            -> (nextid    : Nat)
            -> (cancelled : SortedSet Nat)
-           -> (errors    : List ResourcePoolError)
+           -> (errors    : List StripeError)
            -> Stripe a
 
 ||| A linear mutable stripe.
@@ -222,10 +222,42 @@ data LocalPool1 : (s : Type) -> (a : Type) -> Type where
                -> (stripevar : Stripe1 s a)
                -> LocalPool1 s a
 
+||| A Pool1 error.
+|||
+||| Fields:
+||| - `fnname`                : The function the error originated from
+||| - `errormessage`          : The error formatted as a String
+||| - `errormessagetimestamp` : The timestamp the error occurred at
+|||
+public export
+record Pool1Error where
+  constructor MkPool1Error
+  fnname                : String
+  errormessage          : String
+  errormessagetimestamp : Maybe (IClock CLOCK_REALTIME)
+
+public export
+Show Pool1Error where
+  show (MkPool1Error fnname errormessage (Just errormessagetimestamp)) =
+    "MkPool1Error " ++
+    fnname          ++
+    " "             ++
+    errormessage    ++
+    " "             ++
+    (asctime $ fromUTC errormessagetimestamp)
+  show (MkPool1Error fnname errormessage Nothing)                      =
+    "MkPool1Error " ++
+    fnname          ++
+    " "             ++
+    errormessage    ++
+    " "             ++
+    "IClock CLOCK_REALTIME"
+
 ||| Striped resource pool based on linear mutable references.
 |||
 public export
 data Pool1 : (s : Type) -> (n : Nat) -> (a : Type) -> Type where
   MkPool1 :  (poolconfig : PoolConfig a)
           -> (localpools : (MArray s n (LocalPool1 s a)))
+          -> (errors     : Ref s (List Pool1Error))
           -> Pool1 s n a
