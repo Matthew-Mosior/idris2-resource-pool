@@ -48,7 +48,7 @@ test_waiterResume = do
               withResource pool' $ \_ => do
                 usleep 300000
           case withr of
-            Left () =>
+            Left  _ =>
               die "Error calling withResource"
             Right _ =>
               writeref thread1done True
@@ -61,7 +61,7 @@ test_waiterResume = do
               withResource pool' $ \_ => do
                 pure ()
           case withr of
-            Left () =>
+            Left  _ =>
               die "Error calling withResource"
             Right _ =>
               writeref thread2done True

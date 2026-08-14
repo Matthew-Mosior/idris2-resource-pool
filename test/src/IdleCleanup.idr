@@ -51,23 +51,21 @@ test_idleCleanup = do
       -- create + cache resource
       withr <- runIO (withResource pool' (\_ => pure ()))
       case withr of
-        Left () =>
+        Left _  =>
           die "Error calling withResource"
         Right _ => do
           c1 <- readref stats.created
           f1 <- readref stats.freed
           when (c1 /= 1) $
-            assert_total $
-              idris_crash "expected one created resource"
+            die "expected one created resource"
           when (f1 /= 0) $
-            assert_total $
-              idris_crash "expected zero freed resources"
+            die "expected zero freed resources"
           -- wait beyond TTL
           usleep 300000
           -- trigger cleanup path
           withr' <- runIO (withResource pool' (\_ => pure ()))
           case withr' of
-            Left () =>
+            Left _  =>
               die "Error calling withResource"
             Right _ => do
               c2 <- readref stats.created

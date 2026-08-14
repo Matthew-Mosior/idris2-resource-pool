@@ -154,7 +154,6 @@ Show StripeError where
 ||| - `queuer`    : secondary FIFO (amortized append)
 ||| - `nextId`    : fresh waiter id supply
 ||| - `cancelled` : sorted set of cancelled waiter ids
-||| - `errors`    : errors captured during resource pool operation
 |||
 ||| Invariants:
 ||| - Stripe is immutable between CAS updates.
@@ -169,7 +168,6 @@ data Stripe : (a : Type) -> Type where
            -> (queuer    : Queue (Waiter a))
            -> (nextid    : Nat)
            -> (cancelled : SortedSet Nat)
-           -> (errors    : List StripeError)
            -> Stripe a
 
 ||| A linear mutable stripe.
@@ -259,5 +257,4 @@ public export
 data Pool1 : (s : Type) -> (n : Nat) -> (a : Type) -> Type where
   MkPool1 :  (poolconfig : PoolConfig a)
           -> (localpools : (MArray s n (LocalPool1 s a)))
-          -> (errors     : Ref s (List Pool1Error))
           -> Pool1 s n a

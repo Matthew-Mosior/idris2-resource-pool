@@ -43,7 +43,7 @@ test_fifo = do
     Right pool' => do
       taker <- runIO (takeResource pool')
       case taker of
-        Left ()                               =>
+        Left _                                =>
           die "Error calling takeResource"
         Right (r, lp@(MkLocalPool1 _ stripe)) => do
           orderref <- newref []
@@ -53,18 +53,27 @@ test_fifo = do
              channelGet start
              taker' <- runIO (takeResource pool')
              case taker' of
-               Left ()       =>
+               Left _        =>
                  die "Error calling takeResource"
                Right (r2, _) => do
                  runIO (casmod1 orderref (\xs => (xs ++ [i])))
-                 runIO (putResource pool' stripe r2)
+                 putr <- runIO (putResource pool' stripe r2)
+                 case putr of
+                   Left  _ =>
+                     die "Error calling putResource"
+                   Right _ =>
+                     pure ()
           -- deterministically enqueue in order
           for_ starts $ \start => do
             channelPut start ()
             usleep 10
           -- release initial resource
-          runIO (putResource pool' stripe r)
-          sleep 1
-          result <- readref orderref
-          when (result /= (the (List Nat) [0,1,2,3,4,5,6,7,8,9])) $
-            die "out of order: \{show result}"
+          putr <- runIO (putResource pool' stripe r)
+          case putr of
+            Left  _ =>
+              die "Error calling putResource"
+            Right _ => do
+              sleep 1
+              result <- readref orderref
+              when (result /= (the (List Nat) [0,1,2,3,4,5,6,7,8,9])) $
+                die "out of order: \{show result}"

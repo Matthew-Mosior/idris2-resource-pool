@@ -65,7 +65,7 @@ test_maxResourcesBound = do
                         usleep 10000
                         resourceExit stats
                   case withr of
-                    Left () =>
+                    Left  _ =>
                       die "Error calling withResource"
                     Right _ =>
                       pure ()
