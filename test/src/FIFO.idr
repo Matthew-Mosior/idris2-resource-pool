@@ -43,9 +43,9 @@ test_fifo = do
     Right pool' => do
       taker <- runIO (takeResource pool')
       case taker of
-        Left _                                =>
+        Left _                                       =>
           die "Error calling takeResource"
-        Right (r, lp@(MkLocalPool1 _ stripe)) => do
+        Right (r, lp@(MkLocalPool1 stripeid stripe)) => do
           orderref <- newref []
           starts <- traverse (\_ => makeChannel) [0,1,2,3,4,5,6,7,8,9]
           for_ (zip [0,1,2,3,4,5,6,7,8,9] starts) $ \(i, start) =>
@@ -57,7 +57,7 @@ test_fifo = do
                  die "Error calling takeResource"
                Right (r2, _) => do
                  runIO (casmod1 orderref (\xs => (xs ++ [i])))
-                 putr <- runIO (putResource pool' stripe r2)
+                 putr <- runIO (putResource pool' (stripeid, stripe) r2)
                  case putr of
                    Left  _ =>
                      die "Error calling putResource"
@@ -68,7 +68,7 @@ test_fifo = do
             channelPut start ()
             usleep 10
           -- release initial resource
-          putr <- runIO (putResource pool' stripe r)
+          putr <- runIO (putResource pool' (stripeid, stripe) r)
           case putr of
             Left  _ =>
               die "Error calling putResource"

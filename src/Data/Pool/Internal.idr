@@ -109,6 +109,7 @@ data Entry : (a : Type) -> Type where
 ||| A Stripe error.
 |||
 ||| Fields:
+||| - 'id'                    : The identifier of the Stripe the error originated from
 ||| - `fnname`                : The function the error originated from
 ||| - `errormessage`          : The error formatted as a String
 ||| - `errormessagetimestamp` : The timestamp the error occurred at
@@ -116,21 +117,26 @@ data Entry : (a : Type) -> Type where
 public export
 record StripeError where
   constructor MkStripeError
+  id                    : Nat
   fnname                : String
   errormessage          : String
   errormessagetimestamp : Maybe (IClock CLOCK_REALTIME)
 
 public export
 Show StripeError where
-  show (MkStripeError fnname errormessage (Just errormessagetimestamp)) =
+  show (MkStripeError id fnname errormessage (Just errormessagetimestamp)) =
     "MkStripeError " ++
+    (show id)        ++
+    " "              ++
     fnname           ++
     " "              ++
     errormessage     ++
     " "              ++
     (asctime $ fromUTC errormessagetimestamp)
-  show (MkStripeError fnname errormessage Nothing)                      =
+  show (MkStripeError id fnname errormessage Nothing)                      =
     "MkStripeError " ++
+    (show id)        ++
+    " "              ++
     fnname           ++
     " "              ++
     errormessage     ++
