@@ -38,7 +38,7 @@ test_wakeCreateHandoff = do
       -- exhaust pool
       taker <- runIO (takeResource pool')
       case taker of
-        Left ()                           =>
+        Left _                            =>
           die "Error calling takeResource"
         Right (r1, MkLocalPool1 _ stripe) => do
           -- waiter coordination
@@ -50,23 +50,32 @@ test_wakeCreateHandoff = do
               channelPut started ()
               taker' <- runIO (takeResource pool')
               case taker' of
-                Left ()       =>
+                Left _        =>
                   die "Error calling takeResource"
                 Right (r2, _) => do
                   writeref acquired True
-                  runIO (putResource pool' stripe r2)
+                  putr <- runIO (putResource pool' stripe r2)
+                  case putr of
+                    Left _  =>
+                      die "Error calling putResource"
+                    Right _ =>
+                      pure ()
           -- ensure waiter enqueued
           channelGet started
           usleep 10000
           -- destroy original resource
-          runIO (destroyResource stripe)
-          -- wait for thread
-          threadWait tid
-          -- waiter should wake via Create
-          sleep 1
-          acquiredresult <- readref acquired
-          createdcount   <- readref createdref
-          when (not acquiredresult) $
-            die "waiter never acquired replacement resource"
-          when (createdcount /= 2) $
-            die ("unexpected create count: " ++ show createdcount)
+          destr <- runIO (destroyResource stripe)
+          case destr of
+            Left _  =>
+              die "Error calling destroyResource"
+            Right _ => do
+              -- wait for thread
+              threadWait tid
+              -- waiter should wake via Create
+              sleep 1
+              acquiredresult <- readref acquired
+              createdcount   <- readref createdref
+              when (not acquiredresult) $
+                die "waiter never acquired replacement resource"
+              when (createdcount /= 2) $
+                die ("unexpected create count: " ++ show createdcount)

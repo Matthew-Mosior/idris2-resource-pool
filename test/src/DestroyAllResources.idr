@@ -33,29 +33,33 @@ test_destroyAllResources = do
   case pool of
     Left errs   =>
       die "Error creating new pool"
-    Right pool'@(MkPool1 _ pools _) => do
+    Right pool'@(MkPool1 _ pools) => do
       -- create + cache one resource
       withr <- runIO $ withResource pool' (\_ => pure ())
       case withr of
-        Left ()  =>
+        Left _   =>
           die "Error calling withResource"
         Right _  => do
           withr' <- runIO $ withResource pool' (\_ => pure ())
           case withr' of
-            Left ()  =>
+            Left _   =>
               die "Error calling withResource"
             Right _  => do
               -- destroy idle cache
-              runIO $ destroyAllResources pool' pools
-              -- must still work afterwards
-              withr'' <- runIO $ withResource pool' (\_ => pure ())
-              case withr'' of
-                Left ()  =>
-                  die "Error calling withResource"
-                Right _  => do
-                  c <- readref created
-                  f <- readref freed
-                  when (c /= 2) $
-                    die "expected resource recreation after destroy"
-                  when (f /= 1) $
-                    die "expected exactly one freed resource"
+              destr <- runIO $ destroyAllResources pool' pools
+              case destr of
+                Left  _ =>
+                  die "Error calling destroyAllResources"
+                Right _ => do
+                  -- must still work afterwards
+                  withr'' <- runIO $ withResource pool' (\_ => pure ())
+                  case withr'' of
+                    Left _   =>
+                      die "Error calling withResource"
+                    Right _  => do
+                      c <- readref created
+                      f <- readref freed
+                      when (c /= 2) $
+                        die "expected resource recreation after destroy"
+                      when (f /= 1) $
+                        die "expected exactly one freed resource"

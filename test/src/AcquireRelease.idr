@@ -35,12 +35,12 @@ test_basicAcquireRelease = do
     Right pool' => do
       withr <- runIO $ withResource pool' (\_ => pure ())
       case withr of
-        Left ()  =>
+        Left _   =>
           die "Error calling withResource"
         Right _  => do
           withr' <- runIO $ withResource pool' (\_ => pure ())
           case withr' of
-            Left ()  =>
+            Left _   =>
               die "Error calling withResource"
             Right _  => do
               c <- readref created

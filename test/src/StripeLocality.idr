@@ -42,11 +42,15 @@ test_stripeLocality = do
       stripeids <- for [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20] $ \_ => do
         taker <- runIO (takeResource pool')
         case taker of
-          Left ()                            =>
+          Left _                             =>
             die "Error calling takeResource"
           Right (r, MkLocalPool1 sid stripe) => do
-            runIO (putResource pool' stripe r)
-            pure sid
+            putr <- runIO (putResource pool' stripe r)
+            case putr of
+              Left  _ =>
+                die "Error calling putResource"
+              Right _ =>
+                pure sid
       case stripeids of
         []        =>
           pure ()
