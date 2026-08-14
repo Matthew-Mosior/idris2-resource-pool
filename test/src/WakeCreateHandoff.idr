@@ -38,9 +38,9 @@ test_wakeCreateHandoff = do
       -- exhaust pool
       taker <- runIO (takeResource pool')
       case taker of
-        Left _                            =>
+        Left _                                   =>
           die "Error calling takeResource"
-        Right (r1, MkLocalPool1 _ stripe) => do
+        Right (r1, MkLocalPool1 stripeid stripe) => do
           -- waiter coordination
           started <- makeChannel
           acquired <- newref False
@@ -54,7 +54,7 @@ test_wakeCreateHandoff = do
                   die "Error calling takeResource"
                 Right (r2, _) => do
                   writeref acquired True
-                  putr <- runIO (putResource pool' stripe r2)
+                  putr <- runIO (putResource pool' (stripeid, stripe) r2)
                   case putr of
                     Left _  =>
                       die "Error calling putResource"
@@ -64,7 +64,7 @@ test_wakeCreateHandoff = do
           channelGet started
           usleep 10000
           -- destroy original resource
-          destr <- runIO (destroyResource stripe)
+          destr <- runIO (destroyResource (stripeid, stripe))
           case destr of
             Left _  =>
               die "Error calling destroyResource"
