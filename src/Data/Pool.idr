@@ -46,11 +46,10 @@ isCancelled :  Nat
 isCancelled _ QEnd         =
   False
 isCancelled x (QNode y ys) =
-  case x == y of
-    True  =>
-      True
-    False =>
-      isCancelled x ys
+  let True = x == y
+        | False =>
+            isCancelled x ys
+    in True
 
 ||| Append a value into the `Queue a`.
 |||
@@ -105,14 +104,13 @@ dequeueLive :  Queue (Waiter a)
 dequeueLive QEnd                              cancelled =
   (Nothing, QEnd, cancelled)
 dequeueLive (QNode w@(MkWaiter id wake) rest) cancelled =
-  case contains id cancelled of
-    True  =>
-      -- cancelled waiter
-      -- consume tombstone and continue
-      dequeueLive rest (delete id cancelled)
-    False =>
-      -- live waiter
-      (Just w, rest, cancelled)
+  let True = contains id cancelled
+        | False =>
+            -- live waiter
+            (Just w, rest, cancelled)
+    in -- cancelled waiter
+       -- consume tombstone and continue
+       dequeueLive rest (delete id cancelled)
 
 ||| Stripe-level dequeue.
 |||
@@ -121,11 +119,10 @@ dequeueStripe :  Stripe a
 dequeueStripe (MkStripe available cache queue queuer nextid cancelled) =
   let fullq                  = normalize queue queuer
       (mw, rest, cancelled') = dequeueLive fullq cancelled
-    in case mw of
-         Nothing =>
+      Just w                 = mw
+        | Nothing =>
            (Nothing, MkStripe available cache QEnd QEnd nextid cancelled')
-         Just w  =>
-           (Just w, MkStripe available cache rest QEnd nextid cancelled')
+    in (Just w, MkStripe available cache rest QEnd nextid cancelled')
 
 ||| Check to see if entry is stale.
 |||
@@ -176,14 +173,13 @@ runEffects (stripeid, (MkStripe1 striperef)) effects t =
       let monotonicnow # t := ioToF1 (runElinIO grabMonotonicTime) t
         in case monotonicnow of
              Left monotonicnowerr =>
-               let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
-                 in case realtimenow of
-                      Left realtimenowerr =>
-                        Left [ MkStripeError stripeid "Data.Pool.runEffects.runEffect" (show monotonicnowerr) Nothing
-                             , MkStripeError stripeid "Data.Pool.runEffects.runEffect" (show realtimenowerr) Nothing
-                             ] # t
-                      Right realtimenow'  =>
-                        Left [MkStripeError stripeid "Data.Pool.runEffects.runEffect" (show monotonicnowerr) (Just realtimenow')] # t
+               let realtimenow    # t := ioToF1 (runElinIO grabRealTime) t
+                   Right realtimenow' := realtimenow
+                     | Left realtimenowerr =>
+                         Left [ MkStripeError stripeid "Data.Pool.runEffects.runEffect" (show monotonicnowerr) Nothing
+                              , MkStripeError stripeid "Data.Pool.runEffects.runEffect" (show realtimenowerr) Nothing
+                              ] # t
+                 in Left [MkStripeError stripeid "Data.Pool.runEffects.runEffect" (show monotonicnowerr) (Just realtimenow')] # t
              Right monotonicnow'  =>
                let entry  := MkEntry val monotonicnow'
                    () # t := casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled) =>
@@ -322,11 +318,10 @@ newPool numstripes pc@(MkPoolConfig create free cachettl (maxres ** prfmaxres) _
                                   (distribute base rest numstripes)
       pools       # t := unsafeMArray1 numstripes t
       pools'      # t := saturateLocalPools 0 numstripes striperesources pools t
-    in case pools' of
-         Left errors =>
-           Left errors # t
-         Right ()    =>
-           Right (MkPool1 pc pools) # t
+      Right ()        := pools'
+        | Left errors =>
+            Left errors # t
+    in Right (MkPool1 pc pools) # t
   where
     range :  Nat
           -> Nat
@@ -356,16 +351,15 @@ newPool numstripes pc@(MkPoolConfig create free cachettl (maxres ** prfmaxres) _
     saturateLocalPools o (S j) resources arr t =
       case lookup j resources of
         Nothing       =>
-          let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
-            in case realtimenow of
-                 Left realtimenowerr =>
-                   let newerrors := [ MkPool1Error "Data.Pool.newPool.saturatePools" (show realtimenowerr) Nothing
-                                    , MkPool1Error "Data.Pool.newPool.saturatePools" "impossible index" Nothing
-                                    ]
-                     in Left newerrors # t
-                 Right realtimenow'  =>
-                   let newerrors := [MkPool1Error "Data.Pool.newPool.saturatePools" "impossible index" (Just realtimenow')]
-                     in Left newerrors # t
+          let realtimenow    # t := ioToF1 (runElinIO grabRealTime) t
+              Right realtimenow' := realtimenow
+                | Left realtimenowerr =>
+                    let newerrors := [ MkPool1Error "Data.Pool.newPool.saturatePools" (show realtimenowerr) Nothing
+                                     , MkPool1Error "Data.Pool.newPool.saturatePools" "impossible index" Nothing
+                                     ]
+                      in Left newerrors # t
+              newerrors := [MkPool1Error "Data.Pool.newPool.saturatePools" "impossible index" (Just realtimenow')]
+            in Left newerrors # t
         Just resource =>
           let striperef  # t := ref1 ( MkStripe resource
                                                 []
@@ -376,21 +370,19 @@ newPool numstripes pc@(MkPoolConfig create free cachettl (maxres ** prfmaxres) _
                                      ) t
               striperef1     := MkStripe1 striperef
               localpool      := MkLocalPool1 j striperef1
-            in case tryNatToFin j of
-                 Nothing =>
-                   let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
-                     in case realtimenow of
-                          Left realtimenowerr =>
-                            let newerrors := [ MkPool1Error "Data.Pool.newPool.saturatePools" (show realtimenowerr) Nothing
-                                             , MkPool1Error "Data.Pool.newPool.saturatePools" "couldn't convert Nat to Fin" Nothing
-                                             ]
-                              in Left newerrors # t
-                          Right realtimenow'  =>
-                            let newerrors := [MkPool1Error "Data.Pool.newPool.saturatePools" "couldn't convert Nat to Fin" (Just realtimenow')]
-                              in Left newerrors # t
-                 Just j' =>
-                   let () # t := set arr j' localpool t
-                     in saturateLocalPools o j resources arr t
+              Just j'        := tryNatToFin j
+                | Nothing =>
+                    let realtimenow    # t := ioToF1 (runElinIO grabRealTime) t
+                        Right realtimenow' := realtimenow
+                          | Left realtimenowerr =>
+                              let newerrors := [ MkPool1Error "Data.Pool.newPool.saturatePools" (show realtimenowerr) Nothing
+                                               , MkPool1Error "Data.Pool.newPool.saturatePools" "couldn't convert Nat to Fin" Nothing
+                                               ]
+                                in Left newerrors # t
+                        newerrors := [MkPool1Error "Data.Pool.newPool.saturatePools" "couldn't convert Nat to Fin" (Just realtimenow')]
+                      in Left newerrors # t
+              ()         # t := set arr j' localpool t
+            in saturateLocalPools o j resources arr t
 
 ||| Select a `LocalPool1 World a` for the current thread.
 |||
@@ -466,100 +458,88 @@ getLocalPool :  {n : Nat}
 getLocalPool pool@(MkPool1 _ localpools) t =
   case n == 1 of
     True  =>
-      let sid  := 0
-          sid' := remInt sid (cast {to=Int} n)
-        in case sid' of
-             Nothing    =>
-               let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
-                 in case realtimenow of
-                      Left realtimenowerr =>
-                        let newerrors := [ MkPool1Error "Data.Pool.getLocalPool" (show realtimenowerr) Nothing
-                                         , MkPool1Error "Data.Pool.getLocalPool" "division by zero" Nothing
-                                         ]
-                          in Left newerrors # t
-                      Right realtimenow'  =>
-                        let newerrors := [MkPool1Error "Data.Pool.getLocalPool" "division by zero" (Just realtimenow')]
-                          in Left newerrors # t
-             Just sid'' =>
-               case tryNatToFin (cast {to=Nat} sid'') of
-                 Nothing     =>
-                   let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
-                     in case realtimenow of
-                          Left realtimenowerr =>
-                            let newerrors := [ MkPool1Error "Data.Pool.getLocalPool" (show realtimenowerr) Nothing
-                                             , MkPool1Error "Data.Pool.getLocalPool" "couldn't convert Nat to Fin" Nothing
-                                             ]
-                              in Left newerrors # t
-                          Right realtimenow'  =>
-                            let newerrors := [MkPool1Error "Data.Pool.getLocalPool" "couldn't convert Nat to Fin" (Just realtimenow')]
-                              in Left newerrors # t
-                 Just sid''' =>
-                   let sid'''' # t := get localpools sid''' t
-                     in Right sid'''' # t
+      let sid         := 0
+          sid'        := remInt sid (cast {to=Int} n)
+          Just sid''  := sid'
+            | Nothing =>
+                let realtimenow    # t := ioToF1 (runElinIO grabRealTime) t
+                    Right realtimenow' := realtimenow
+                      | Left realtimenowerr =>
+                          let newerrors := [ MkPool1Error "Data.Pool.getLocalPool" (show realtimenowerr) Nothing
+                                           , MkPool1Error "Data.Pool.getLocalPool" "division by zero" Nothing
+                                           ]
+                            in Left newerrors # t
+                    newerrors := [MkPool1Error "Data.Pool.getLocalPool" "division by zero" (Just realtimenow')]
+                  in Left newerrors # t
+          Just sid''' := tryNatToFin (cast {to=Nat} sid'')
+            | Nothing =>
+                let realtimenow    # t := ioToF1 (runElinIO grabRealTime) t
+                    Right realtimenow' := realtimenow
+                      | Left realtimenowerr =>
+                          let newerrors := [ MkPool1Error "Data.Pool.getLocalPool" (show realtimenowerr) Nothing
+                                           , MkPool1Error "Data.Pool.getLocalPool" "couldn't convert Nat to Fin" Nothing
+                                           ]
+                            in Left newerrors # t
+                    newerrors := [MkPool1Error "Data.Pool.getLocalPool" "couldn't convert Nat to Fin" (Just realtimenow')]
+                  in Left newerrors # t
+          sid'''' # t := get localpools sid''' t
+        in Right sid'''' # t
     False =>
-      let sid # t := ioToF1 getThreadId t
-          sid'    := remInt sid (cast {to=Int} n)
-        in case sid' of
-             Nothing    =>
-               let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
-                 in case realtimenow of
-                      Left realtimenowerr =>
-                        let newerrors := [ MkPool1Error "Data.Pool.getLocalPool" (show realtimenowerr) Nothing
-                                         , MkPool1Error "Data.Pool.getLocalPool" "division by zero" Nothing
-                                         ]
-                          in Left newerrors # t
-                      Right realtimenow'  =>
-                        let newerrors := [MkPool1Error "Data.Pool.getLocalPool" "division by zero" (Just realtimenow')]
-                          in Left newerrors # t
-             Just sid'' =>
-               case tryNatToFin (cast {to=Nat} sid'') of
-                 Nothing     =>
-                   let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
-                     in case realtimenow of
-                          Left realtimenowerr =>
-                            let newerrors := [ MkPool1Error "Data.Pool.getLocalPool" (show realtimenowerr) Nothing
-                                             , MkPool1Error "Data.Pool.getLocalPool" "couldn't convert Nat to Fin" Nothing
-                                             ]
-                              in Left newerrors # t
-                          Right realtimenow'  =>
-                            let newerrors := [MkPool1Error "Data.Pool.getLocalPool" "couldn't convert Nat to Fin" (Just realtimenow')]
-                              in Left newerrors # t
-                 Just sid''' =>
-                   let sid'''' # t := get localpools sid''' t
-                     in Right sid'''' # t
+      let sid     # t := ioToF1 getThreadId t
+          sid'        := remInt sid (cast {to=Int} n)
+          Just sid''  := sid'
+            | Nothing =>
+                let realtimenow    # t := ioToF1 (runElinIO grabRealTime) t
+                    Right realtimenow' := realtimenow
+                      | Left realtimenowerr =>
+                          let newerrors := [ MkPool1Error "Data.Pool.getLocalPool" (show realtimenowerr) Nothing
+                                           , MkPool1Error "Data.Pool.getLocalPool" "division by zero" Nothing
+                                           ]
+                            in Left newerrors # t
+                    newerrors := [MkPool1Error "Data.Pool.getLocalPool" "division by zero" (Just realtimenow')]
+                  in Left newerrors # t
+          Just sid''' := tryNatToFin (cast {to=Nat} sid'')
+            | Nothing =>
+                let realtimenow    # t := ioToF1 (runElinIO grabRealTime) t
+                    Right realtimenow' := realtimenow
+                      | Left realtimenowerr =>
+                          let newerrors := [ MkPool1Error "Data.Pool.getLocalPool" (show realtimenowerr) Nothing
+                                           , MkPool1Error "Data.Pool.getLocalPool" "couldn't convert Nat to Fin" Nothing
+                                           ]
+                            in Left newerrors # t
+                    newerrors := [MkPool1Error "Data.Pool.getLocalPool" "couldn't convert Nat to Fin" (Just realtimenow')]
+                  in Left newerrors # t
+          sid'''' # t := get localpools sid''' t
+        in Right sid'''' # t
   where
     signumInt :  Int
               -> Int
     signumInt x =
-      case x > 0 of
-        True  =>
-          1
-        False =>
-          case x < 0 of
-            True  =>
-              -1
-            False =>
-              0      
+      let False = x > 0
+            | True =>
+                1
+          False = x < 0
+            | True =>
+                -1
+        in 0 
     quotInt :  Int
             -> Int
             -> Int
     quotInt x y =
-      let q = x `div` y
-          r = x `mod` y
-        in case (r /= 0) && (signumInt x /= signumInt y) of
-             True  =>
-               q + 1
-             False =>
-               q
+      let q     = x `div` y
+          r     = x `mod` y
+          False = (r /= 0) && (signumInt x /= signumInt y)
+            | True =>
+                q + 1
+        in q
     remInt :  Int
            -> Int
            -> Maybe Int
     remInt x y =
-      case y == 0 of
-        True  =>
-          Nothing
-        False =>
-          Just $ x - (quotInt x y) * y
+      let False = y == 0
+            | True =>
+                Nothing
+        in Just $ x - (quotInt x y) * y
 
 ||| Deliver a value to a `Stripe a` state.
 |||
@@ -578,22 +558,20 @@ signal :  Stripe a
        -> StripeStep a
 signal stripe@(MkStripe available cache queue queuer nextid cancelled) result =
   let (mw, MkStripe available' cache' queue' queuer' nextid' cancelled') = dequeueStripe stripe
-    in case mw of
-         -- no waiting thread
-         Nothing =>
-           case result of
-             Deliver val            =>
-               MkStripeStep (MkStripe (S available') cache' queue' queuer' nextid' cancelled')
-                            [InsertWithTimestamp val]
-             Create                 =>
-               MkStripeStep (MkStripe available' cache' queue' queuer' nextid' cancelled')
-                            [None]
-             Cancelled              =>
-               MkStripeStep (MkStripe available' cache' queue' queuer' nextid' cancelled')
-                            [None]
-         Just (MkWaiter _ wake) =>
-           MkStripeStep (MkStripe available' cache' queue' queuer' nextid' cancelled')
-                        [Wake wake result]
+      Just (MkWaiter _ wake)                                             = mw
+        | Nothing =>
+            case result of
+              Deliver val            =>
+                MkStripeStep (MkStripe (S available') cache' queue' queuer' nextid' cancelled')
+                             [InsertWithTimestamp val]
+              Create                 =>
+                MkStripeStep (MkStripe available' cache' queue' queuer' nextid' cancelled')
+                             [None]
+              Cancelled              =>
+                MkStripeStep (MkStripe available' cache' queue' queuer' nextid' cancelled')
+                             [None]
+    in MkStripeStep (MkStripe available' cache' queue' queuer' nextid' cancelled')
+                    [Wake wake result]
 
 ||| Block until a resource is delivered to this waiter.
 |||
@@ -634,21 +612,19 @@ waitForResource :  (Nat, Stripe1 World a)
                 -> Channel (WakeResult a) -- wake channel
                 -> F1 World (Either (List StripeError) (WakeResult a))
 waitForResource (stripeid, (MkStripe1 striperef)) wid wake t =
-  let res # t := ioToF1 (runElinIO (waitForResource' (MkStripe1 striperef) wid wake)) t
-    in case res of
-         Right res' =>
-           Right res' # t
-         Left err   =>
-            let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
-              in case realtimenow of
-                   Left realtimenowerr =>
-                     let newerrors := [ MkStripeError stripeid "Data.Pool.waitForResource" (show realtimenowerr) Nothing
-                                      , MkStripeError stripeid "Data.Pool.waitForResource" (show err) Nothing
-                                      ]
-                       in Left newerrors # t
-                   Right realtimenow'  =>
-                     let newerrors := [MkStripeError stripeid "Data.Pool.waitForResource" (show err) (Just realtimenow')]
-                       in Left newerrors # t
+  let res    # t := ioToF1 (runElinIO (waitForResource' (MkStripe1 striperef) wid wake)) t
+      Right res' := res
+        | Left err =>
+            let realtimenow    # t := ioToF1 (runElinIO grabRealTime) t
+                Right realtimenow' := realtimenow
+                  | Left realtimenowerr =>
+                      let newerrors := [ MkStripeError stripeid "Data.Pool.waitForResource" (show realtimenowerr) Nothing
+                                       , MkStripeError stripeid "Data.Pool.waitForResource" (show err) Nothing
+                                       ]
+                        in Left newerrors # t
+                newerrors := [MkStripeError stripeid "Data.Pool.waitForResource" (show err) (Just realtimenow')]
+              in Left newerrors # t
+    in Right res' # t
   where
     cleanup :   Stripe1 World a
              -> Nat
@@ -683,25 +659,22 @@ export
 destroyResource :  (Nat, Stripe1 World a)
                 -> F1 World (Either (List StripeError) ())
 destroyResource (stripeid, (MkStripe1 striperef)) t =
-  let res # t := ioToF1 (runElinIO (destroy (stripeid, (MkStripe1 striperef)))) t
-    in case res of
-         Right res' =>
-           case res' of
-             Left errs =>
-               Left errs # t
-             Right ()  =>
-               Right () # t
-         Left err   =>
-            let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
-              in case realtimenow of
-                   Left realtimenowerr =>
-                     let newerrors := [ MkStripeError stripeid "Data.Pool.destroyResource" (show realtimenowerr) Nothing
-                                      , MkStripeError stripeid "Data.Pool.destroyResource" (show err) Nothing
-                                      ]
-                       in Left newerrors # t
-                   Right realtimenow'  =>
-                     let newerrors := [MkStripeError stripeid "Data.Pool.destroyResource" (show err) (Just realtimenow')]
-                       in Left newerrors # t
+  let res    # t := ioToF1 (runElinIO (destroy (stripeid, (MkStripe1 striperef)))) t
+      Right res' := res
+        | Left err =>
+            let realtimenow    # t := ioToF1 (runElinIO grabRealTime) t
+                Right realtimenow' := realtimenow
+                  | Left realtimenowerr =>
+                      let newerrors := [ MkStripeError stripeid "Data.Pool.destroyResource" (show realtimenowerr) Nothing
+                                       , MkStripeError stripeid "Data.Pool.destoryResource" (show err) Nothing
+                                       ]
+                        in Left newerrors # t
+                newerrors := [MkStripeError stripeid "Data.Pool.destroyResource" (show err) (Just realtimenow')]
+              in Left newerrors # t
+      Right ()   := res'
+        | Left errs =>
+            Left errs # t
+    in Right () # t
   where
     destroy' :  (Nat, Stripe1 World a)
              -> F1 World (Either (List StripeError) ())
@@ -733,24 +706,21 @@ cleanStripe :  (Entry a -> Bool)
             -> F1 World (Either (List StripeError) ())
 cleanStripe isstale free (stripeid, (MkStripe1 striperef)) t =
   let res # t := ioToF1 (runElinIO (cleanStripe' (stripeid, (MkStripe1 striperef)))) t
-    in case res of
-         Right res' =>
-           case res' of
-             Left errs =>
-               Left errs # t
-             Right ()  =>
-               Right () # t
-         Left err   =>
-            let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
-              in case realtimenow of
-                   Left realtimenowerr =>
-                     let newerrors := [ MkStripeError stripeid "Data.Pool.cleanStripe" (show realtimenowerr) Nothing
-                                      , MkStripeError stripeid "Data.Pool.cleanStripe" (show err) Nothing
-                                      ]
-                       in Left newerrors # t
-                   Right realtimenow'  =>
-                     let newerrors := [MkStripeError stripeid "Data.Pool.cleanStripe" (show err) (Just realtimenow')]
-                       in Left newerrors # t
+      Right res' := res
+        | Left err =>
+            let realtimenow    # t := ioToF1 (runElinIO grabRealTime) t
+                Right realtimenow' := realtimenow
+                  | Left realtimenowerr =>
+                      let newerrors := [ MkStripeError stripeid "Data.Pool.cleanStripe" (show realtimenowerr) Nothing
+                                       , MkStripeError stripeid "Data.Pool.cleanStripe" (show err) Nothing
+                                       ]
+                        in Left newerrors # t
+                newerrors := [MkStripeError stripeid "Data.Pool.cleanStripe" (show err) (Just realtimenow')]
+              in Left newerrors # t
+      Right ()   := res'
+        | Left errs =>
+            Left errs # t
+    in Right () # t
   where
     step :  Stripe a
          -> StripeStep a
@@ -845,24 +815,19 @@ cleanStripeIfNeeded :  (ttl : Clock Duration)
                     -> (Nat, Stripe1 World a)
                     -> F1 World (Either (List StripeError) ())
 cleanStripeIfNeeded ttl free (stripeid, (MkStripe1 striperef)) t =
-  let now # t := ioToF1 (runElinIO grabTime) t
-    in case now of
-         Left err   =>
-            let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
-              in case realtimenow of
-                   Left realtimenowerr =>
-                     let newerrors := [ MkStripeError stripeid "Data.Pool.cleanStripeIfNeeded" (show realtimenowerr) Nothing
-                                      , MkStripeError stripeid "Data.Pool.cleanStripeIfNeeded" (show err) Nothing
-                                      ]
-                       in Left newerrors # t
-                   Right realtimenow'  =>
-                     let newerrors := [MkStripeError stripeid "Data.Pool.cleanStripeIfNeeded" (show err) (Just realtimenow')]
-                       in Left newerrors # t
-         Right now' =>
-           cleanStripe (isStale ttl now') free (stripeid, (MkStripe1 striperef)) t
-  where    
-    grabTime : Elin World [Errno] (IClock CLOCK_MONOTONIC)
-    grabTime = getTime CLOCK_MONOTONIC
+  let now    # t := ioToF1 (runElinIO grabMonotonicTime) t
+      Right now' := now
+        | Left err   =>
+            let realtimenow    # t := ioToF1 (runElinIO grabRealTime) t
+                Right realtimenow' := realtimenow
+                  | Left realtimenowerr =>
+                      let newerrors := [ MkStripeError stripeid "Data.Pool.cleanStripeIfNeeded" (show realtimenowerr) Nothing
+                                       , MkStripeError stripeid "Data.Pool.cleanStripeIfNeeded" (show err) Nothing
+                                       ]
+                        in Left newerrors # t
+                newerrors := [MkStripeError stripeid "Data.Pool.cleanStripeIfNeeded" (show err) (Just realtimenow')]
+              in Left newerrors # t
+    in cleanStripe (isStale ttl now') free (stripeid, (MkStripe1 striperef)) t
 
 ||| Return a resource to the `Pool1 World n a`.
 |||
@@ -917,11 +882,10 @@ destroyAllResources (MkPool1 (MkPoolConfig _ freeresource _ _ _ _) _) localpools
     go o (S j) arr t =
       let MkLocalPool1 stripeid stripe1 # t := getIx arr j t
           cleanedstripe                 # t := cleanStripe (const True) freeresource (stripeid, stripe1) t
-        in case cleanedstripe of
-             Left errs =>
-               Left errs # t
-             Right ()  =>
-               go o j arr t
+          Right ()                          := cleanedstripe
+            | Left errs =>
+                Left errs # t
+        in go o j arr t
 
 ||| Restore one unit of available capacity in the `Stripe a`.
 |||
@@ -1007,150 +971,135 @@ takeResource :  {n : Nat}
              -> Pool1 World n a
              -> F1 World (Either (Either (List Pool1Error) (List StripeError)) (a, LocalPool1 World a))
 takeResource pool@(MkPool1 poolconfig@(MkPoolConfig _ free ttl _ _ _) localpools) t =
-  let lp # t := getLocalPool pool t
-    in case lp of
-         Left errs                                                       =>
-           Left (Left errs) # t
-         Right lp'@(MkLocalPool1 stripeid stripe1@(MkStripe1 striperef)) =>
-           -- clean stripe if needed
-           let cleanedstripe                                     # t := cleanStripeIfNeeded ttl free (stripeid, (MkStripe1 striperef)) t
-             in case cleanedstripe of
-                  Left errs =>
-                    Left (Right errs) # t
-                  Right ()  =>
-                    -- pre-allocate channel for slow path
-                    let wake                                              # t := ioToF1 makeChannel t
-                        res                                                   : (List (StripeEffect a), Either a (Either () (Nat, Channel (WakeResult a))))
-                        res@(effects, res')                               # t :=
-                          casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled) =>
-                                                  case cache of
-                                                    -- fast path
-                                                    MkEntry v _ :: rest =>
-                                                      let none : List (StripeEffect a)
-                                                          none    = [None]
-                                                          stripe' = MkStripe available
-                                                                             rest
-                                                                             queue
-                                                                             queuer
-                                                                             nextid
-                                                                             cancelled
-                                                          result : Either a (Either () (Nat, Channel (WakeResult a)))
-                                                          result = Left v
-                                                        in ( stripe'
-                                                           , (none, result)
-                                                           )
-                                                    -- slow path
-                                                    []                  =>
-                                                      case available == 0 of
-                                                        True  =>
-                                                          -- enqueue waiter
-                                                          let none : List (StripeEffect a)
-                                                              none    = [None]
-                                                              wid     = nextid
-                                                              waiter : Waiter a
-                                                              waiter  = MkWaiter wid wake
-                                                              stripe' = MkStripe available
-                                                                                 cache
-                                                                                 queue
-                                                                                 (appendQ queuer waiter)
-                                                                                 (S nextid)
-                                                                                 cancelled
-                                                              result : Either a (Either () (Nat, Channel (WakeResult a)))
-                                                              result = Right (Right (wid, wake))
-                                                            in ( stripe'
-                                                               , (none, result)
-                                                               )
-                                                        False =>
-                                                          -- resource creation slot
-                                                          let none : List (StripeEffect a)
-                                                              none    = [None]
-                                                              stripe' = MkStripe (minus available 1)
-                                                                                 cache
-                                                                                 queue
-                                                                                 queuer
-                                                                                 nextid
-                                                                                 cancelled
-                                                              result : Either a (Either () (Nat, Channel (WakeResult a)))
-                                                              result = Right (Left ())
-                                                            in ( stripe'
-                                                               , (none, result)
-                                                               )
-                                          
-                                               ) t
-                        -- Run effects after commit
-                        effects'                                          # t := runEffects (stripeid, stripe1) effects t
-                      in case effects' of
-                           Left errs =>
-                             Left (Right errs) # t
-                           Right ()  =>
-                             case res' of
-                               -- fast path
-                               Left v                    =>
-                                 Right (v, lp') # t
-                               -- create immediately
-                               Right (Left ())           =>
-                                 let res # t := ioToF1 (runElinIO (createWithCleanup poolconfig (stripeid, stripe1))) t
-                                   in case res of
-                                        Right v =>
-                                          Right (v, lp') # t
-                                        Left err =>
-                                          let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
-                                            in case realtimenow of
-                                                 Left realtimenowerr =>
-                                                   let newerrors := [ MkStripeError stripeid "Data.Pool.takeResource" (show realtimenowerr) Nothing
-                                                                    , MkStripeError stripeid "Data.Pool.takeResource" (show err) Nothing
-                                                                    ]
-                                                     in Left (Right newerrors) # t
-                                                 Right realtimenow'  =>
-                                                   let newerrors := [MkStripeError stripeid "Data.Pool.takeResource" (show err) (Just realtimenow')]
-                                                     in Left (Right newerrors) # t
-                               Right (Right (wid, wake)) =>
-                                 let wakeresult # t := waitForResource (stripeid, stripe1) wid wake t
-                                   in case wakeresult of
-                                        Left errs         =>
-                                          let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
-                                            in case realtimenow of
-                                                 Left realtimenowerr =>
-                                                   let newerrors := [ MkStripeError stripeid "Data.Pool.takeResource" (show realtimenowerr) Nothing
-                                                                    , MkStripeError stripeid "Data.Pool.takeResource" "Data.Pool.waitForResource failed" Nothing
-                                                                    ]
-                                                     in Left (Right $ errs ++ newerrors) # t
-                                                 Right realtimenow'  =>
-                                                   let newerrors := [MkStripeError stripeid "Data.Pool.takeResource" "Data.Pool.waitForResource failed" (Just realtimenow')]
-                                                     in Left (Right $ errs ++ newerrors) # t
-                                        Right wakeresult' =>
-                                          case wakeresult' of
-                                            -- woken with resource
-                                            Deliver v =>
-                                              Right (v, lp') # t
-                                            -- need to create
-                                            Create    =>
-                                              let res # t := ioToF1 (runElinIO (createWithCleanup poolconfig (stripeid, stripe1))) t
-                                                in case res of
-                                                     Right v =>
-                                                       Right (v, lp') # t
-                                                     Left err =>
-                                                       let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
-                                                         in case realtimenow of
-                                                              Left realtimenowerr =>
-                                                                let newerrors := [ MkStripeError stripeid "Data.Pool.takeResource" (show realtimenowerr) Nothing
-                                                                                 , MkStripeError stripeid "Data.Pool.takeResource" (show err) Nothing
-                                                                                 ]
-                                                                  in Left (Right newerrors) # t
-                                                              Right realtimenow'  =>
-                                                                let newerrors := [MkStripeError stripeid "Data.Pool.takeResource" (show err) (Just realtimenow')]
-                                                                  in Left (Right newerrors) # t
-                                            Cancelled =>
-                                              let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
-                                                in case realtimenow of
-                                                     Left realtimenowerr =>
-                                                       let newerrors := [ MkStripeError stripeid "Data.Pool.takeResource" (show realtimenowerr) Nothing
-                                                                        , MkStripeError stripeid "Data.Pool.takeResource" "impossible" Nothing
-                                                                        ]
-                                                         in Left (Right newerrors) # t
-                                                     Right realtimenow'  =>
-                                                       let newerrors := [MkStripeError stripeid "Data.Pool.takeResource" "impossible" (Just realtimenow')]
-                                                         in Left (Right newerrors) # t
+  let lp                                                          # t := getLocalPool pool t
+      Right lp'@(MkLocalPool1 stripeid stripe1@(MkStripe1 striperef)) := lp
+        | Left errs =>
+            Left (Left errs) # t
+      cleanedstripe                                               # t := cleanStripeIfNeeded ttl free (stripeid, (MkStripe1 striperef)) t
+      Right ()                                                        := cleanedstripe
+        | Left errs =>
+            Left (Right errs) # t
+      wake                                                        # t := ioToF1 makeChannel t
+      res                                                             : (List (StripeEffect a), Either a (Either () (Nat, Channel (WakeResult a))))
+      (effects, res'')                                            # t :=
+        casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled) =>
+                                case cache of
+                                  -- fast path
+                                  MkEntry v _ :: rest =>
+                                    let none : List (StripeEffect a)
+                                        none    = [None]
+                                        stripe' = MkStripe available
+                                                           rest
+                                                           queue
+                                                           queuer
+                                                           nextid
+                                                           cancelled
+                                        result : Either a (Either () (Nat, Channel (WakeResult a)))
+                                        result = Left v
+                                      in ( stripe'
+                                         , (none, result)
+                                         )
+                                  -- slow path
+                                  []                  =>
+                                    case available == 0 of
+                                      True  =>
+                                        -- enqueue waiter
+                                        let none : List (StripeEffect a)
+                                            none    = [None]
+                                            wid     = nextid
+                                            waiter : Waiter a
+                                            waiter  = MkWaiter wid wake
+                                            stripe' = MkStripe available
+                                                               cache
+                                                               queue
+                                                               (appendQ queuer waiter)
+                                                               (S nextid)
+                                                               cancelled
+                                            result : Either a (Either () (Nat, Channel (WakeResult a)))
+                                            result = Right (Right (wid, wake))
+                                          in ( stripe'
+                                             , (none, result)
+                                             )
+                                      False =>
+                                        -- resource creation slot
+                                        let none : List (StripeEffect a)
+                                            none    = [None]
+                                            stripe' = MkStripe (minus available 1)
+                                                               cache
+                                                               queue
+                                                               queuer
+                                                               nextid
+                                                                cancelled
+                                            result : Either a (Either () (Nat, Channel (WakeResult a)))
+                                            result = Right (Left ())
+                                          in ( stripe'
+                                             , (none, result)
+                                             )
+                             ) t
+      -- Run effects after commit
+      effects'                                                    # t := runEffects (stripeid, stripe1) effects t
+      Right ()                                                        := effects'
+        | Left errs =>
+            Left (Right errs) # t
+      Right (Right (wid, wake))                                       := res''
+        | -- fast path
+          Left v =>
+            Right (v, lp') # t
+          -- create immediately
+        | Right (Left ()) =>
+            let res  # t := ioToF1 (runElinIO (createWithCleanup poolconfig (stripeid, stripe1))) t
+                Left err := res
+                  | Right v =>
+                      Right (v, lp') # t
+                realtimenow    # t := ioToF1 (runElinIO grabRealTime) t
+                Right realtimenow' := realtimenow
+                  | Left realtimenowerr =>
+                      let newerrors := [ MkStripeError stripeid "Data.Pool.takeResource" (show realtimenowerr) Nothing
+                                       , MkStripeError stripeid "Data.Pool.takeResource" (show err) Nothing
+                                       ]
+                        in Left (Right newerrors) # t
+                newerrors           := [MkStripeError stripeid "Data.Pool.takeResource" (show err) (Just realtimenow')]
+              in Left (Right newerrors) # t
+      wakeresult                                                  # t := waitForResource (stripeid, stripe1) wid wake t
+      Right wakeresult'                                               := wakeresult
+        | Left errs =>
+            let realtimenow    # t := ioToF1 (runElinIO grabRealTime) t
+                Right realtimenow' := realtimenow
+                  | Left realtimenowerr =>
+                      let newerrors := [ MkStripeError stripeid "Data.Pool.takeResource" (show realtimenowerr) Nothing
+                                       , MkStripeError stripeid "Data.Pool.takeResource" "Data.Pool.waitForResource failed" Nothing
+                                       ]
+                        in Left (Right $ errs ++ newerrors) # t
+                newerrors := [MkStripeError stripeid "Data.Pool.takeResource" "Data.Pool.waitForResource failed" (Just realtimenow')]
+              in Left (Right $ errs ++ newerrors) # t
+      -- need to create
+      Create                                                          := wakeresult'
+        | -- woken with resource
+          Deliver v =>
+            Right (v, lp') # t
+        | Cancelled =>
+            let realtimenow    # t := ioToF1 (runElinIO grabRealTime) t
+                Right realtimenow' := realtimenow
+                  | Left realtimenowerr =>
+                      let newerrors := [ MkStripeError stripeid "Data.Pool.takeResource" (show realtimenowerr) Nothing
+                                       , MkStripeError stripeid "Data.Pool.takeResource" "impossible" Nothing
+                                       ]
+                        in Left (Right newerrors) # t
+                newerrors := [MkStripeError stripeid "Data.Pool.takeResource" "impossible" (Just realtimenow')]
+              in Left (Right newerrors) # t
+      res                                                         # t := ioToF1 (runElinIO (createWithCleanup poolconfig (stripeid, stripe1))) t
+      Left err                                                        := res
+        | Right v =>
+            Right (v, lp') # t     
+      realtimenow                                                 # t := ioToF1 (runElinIO grabRealTime) t
+      Right realtimenow'                                              := realtimenow
+        | Left realtimenowerr =>
+            let newerrors := [ MkStripeError stripeid "Data.Pool.takeResource" (show realtimenowerr) Nothing
+                             , MkStripeError stripeid "Data.Pool.takeResource" (show err) Nothing
+                             ]
+              in Left (Right newerrors) # t
+      newerrors                                                       := [MkStripeError stripeid "Data.Pool.takeResource" (show err) (Just realtimenow')]
+    in Left (Right newerrors) # t
   where
     createWithCleanup :  PoolConfig a
                       -> (Nat, Stripe1 World a)
@@ -1206,33 +1155,28 @@ withResource :  {n : Nat}
              -> (a -> IO r)
              -> F1 World (Either (Either (List Pool1Error) (List StripeError)) (Maybe r))
 withResource pool@(MkPool1 _ localpools) f t =
-  let res # t := ioToF1 (runElinIO (withResource' pool f)) t
-    in case res of
-         Left err    =>
-           let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
-             in case realtimenow of
-                  Left realtimenowerr =>
-                    let newerrors := [ MkPool1Error "Data.Pool.withResource" (show realtimenowerr) Nothing
-                                     , MkPool1Error "Data.Pool.withResource" (show err) Nothing
-                                     ]
-                      in Left (Left newerrors) # t
-                  Right realtimenow'  =>
-                    let newerrors := [MkPool1Error "Data.Pool.withResource" (show err) (Just realtimenow')]
-                      in Left (Left newerrors) # t
-         Right res' =>
-           case res' of
-             Right res'' =>
-               case res'' of
-                 Nothing     =>
-                   Right Nothing # t
-                 Just res''' =>
-                   Right (Just res''') # t
-             Left errs  =>
-               case errs of
-                 Left poolerrs    =>
-                   Left (Left poolerrs) # t
-                 Right stripeerrs =>
-                   Left (Right stripeerrs) # t 
+  let res     # t := ioToF1 (runElinIO (withResource' pool f)) t
+      Right res'  := res
+        | Left err =>
+            let realtimenow    # t := ioToF1 (runElinIO grabRealTime) t
+                Right realtimenow' := realtimenow
+                  | Left realtimenowerr =>
+                      let newerrors := [ MkPool1Error "Data.Pool.withResource" (show realtimenowerr) Nothing
+                                       , MkPool1Error "Data.Pool.withResource" (show err) Nothing
+                                       ]
+                        in Left (Left newerrors) # t
+                newerrors := [MkPool1Error "Data.Pool.withResource" (show err) (Just realtimenow')]
+              in Left (Left newerrors) # t
+      Right res'' := res'
+        | Left errs =>
+            let Right stripeerrs := errs
+                  | Left poolerrs =>
+                      Left (Left poolerrs) # t
+              in Left (Right stripeerrs) # t
+      Just res''' := res''
+        | Nothing =>
+            Right Nothing # t
+    in Right (Just res''') # t
   where
     withResource' :  {n : Nat}
                   -> MCancel (Elin World)
@@ -1242,23 +1186,20 @@ withResource pool@(MkPool1 _ localpools) f t =
     withResource' pool@(MkPool1 _ localpools) f =
       uncancelable $ \poll => do
         res <- runIO (takeResource pool)
-        case res of
-          Left res'    =>
-            case res' of
-              Left poolerrs    => do
-                pure (Left (Left poolerrs))
-              Right stripeerrs => do
-                pure (Left (Right stripeerrs))
-          Right (res', MkLocalPool1 stripeid (MkStripe1 striperef)) => do
-            res'' <- onAbort (poll $ liftIO $ f res') ( do _ <- runIO (destroyResource (stripeid, (MkStripe1 striperef)))
-                                                           liftIO (pure ())
-                                                      )
-            putr <- runIO (putResource pool (stripeid, (MkStripe1 striperef)) res')
-            case putr of
-              Left errs =>
-                pure (Left (Right errs))
-              Right ()  =>
-                pure (Right (Just res''))
+        let Right (res', MkLocalPool1 stripeid (MkStripe1 striperef)) = res
+              | Left errs => do
+                  let Right stripeerrs = errs
+                        | Left poolerrs =>
+                            pure (Left (Left poolerrs))
+                  pure (Left (Right stripeerrs))
+        res'' <- onAbort (poll $ liftIO $ f res') ( do _ <- runIO (destroyResource (stripeid, (MkStripe1 striperef)))
+                                                       liftIO (pure ())
+                                                  )
+        putr <- runIO (putResource pool (stripeid, (MkStripe1 striperef)) res')
+        let Right () = putr
+              | Left errs =>
+                  pure (Left (Right errs))
+        pure (Right (Just res''))
 
 ||| Attempt to take a resource without blocking.
 |||
@@ -1284,80 +1225,72 @@ tryTakeResource :  {n : Nat}
                 -> Pool1 World n a
                 -> F1 World (Either (Either (List Pool1Error) (List StripeError)) (Maybe (a, LocalPool1 World a)))
 tryTakeResource pool@(MkPool1 _ localpools) t =
-  let res # t := ioToF1 (runElinIO (tryTakeResource' pool)) t
-    in case res of
-         Left err    =>
-           let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
-             in case realtimenow of
-                  Left realtimenowerr =>
-                    let newerrors := [ MkPool1Error "Data.Pool.tryTakeResource" (show realtimenowerr) Nothing
-                                     , MkPool1Error "Data.Pool.tryTakeResource" (show err) Nothing
-                                     ]
-                      in Left (Left newerrors) # t
-                  Right realtimenow'  =>
-                    let newerrors := [MkPool1Error "Data.Pool.tryTakeResource" (show err) (Just realtimenow')]
-                      in Left (Left newerrors) # t
-         Right res' =>
-           case res' of
-             Right res'' =>
-               case res'' of
-                 Nothing     =>
-                   Right Nothing # t
-                 Just res''' =>
-                   Right (Just res''') # t
-             Left errs  =>
-               case errs of
-                 Left poolerrs    =>
-                   Left (Left poolerrs) # t
-                 Right stripeerrs =>
-                   Left (Right stripeerrs) # t 
+  let res     # t := ioToF1 (runElinIO (tryTakeResource' pool)) t
+      Right res'  := res
+        | Left err =>
+            let realtimenow    # t := ioToF1 (runElinIO grabRealTime) t
+                Right realtimenow' := realtimenow
+                  | Left realtimenowerr =>
+                      let newerrors := [ MkPool1Error "Data.Pool.tryTakeResource" (show realtimenowerr) Nothing
+                                       , MkPool1Error "Data.Pool.tryTakeResource" (show err) Nothing
+                                       ]
+                        in Left (Left newerrors) # t
+                newerrors := [MkPool1Error "Data.Pool.tryTakeResource" (show err) (Just realtimenow')]
+              in Left (Left newerrors) # t
+      Right res'' := res'
+        | Left errs =>
+            let Right stripeerrs := errs
+                  | Left poolerrs =>
+                      Left (Left poolerrs) # t
+              in Left (Right stripeerrs) # t
+      Just res''' := res''
+        | Nothing =>
+            Right Nothing # t
+    in Right (Just res''') # t
   where
     tryTakeResource'' :  {n : Nat}
                       -> MCancel (Elin World)
                       => Pool1 World n a
                       -> F1 World (Either (Either (List Pool1Error) (List StripeError)) (Maybe (a, LocalPool1 World a)))
     tryTakeResource'' pool@(MkPool1 (MkPoolConfig _ free ttl _ _ _) _) t =
-      let lp # t := getLocalPool pool t
-        in case lp of
-             Left poolerrs                                                   =>
-               Left (Left poolerrs) # t
-             Right lp'@(MkLocalPool1 stripeid stripe1@(MkStripe1 striperef)) =>
-               -- clean stripe if needed
-               let cleanedstripe # t := cleanStripeIfNeeded ttl free (stripeid, (MkStripe1 striperef)) t
-                 in case cleanedstripe of
-                      Left stripeerrs =>
-                        Left (Right stripeerrs) # t
-                      Right ()        =>
-                        -- attempt fast-path only
-                        let res                                               # t :=
-                              casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled) =>
-                                                      case (available == 0, cache) of
-                                                        -- no capacity, do nothing
-                                                        (True, _)                    =>
-                                                          ( MkStripe available cache queue queuer nextid cancelled
-                                                          , Nothing
-                                                          )
-                                                        -- cache hit, consume
-                                                        (False, MkEntry v _ :: rest) =>
-                                                          ( MkStripe available
-                                                                     rest
-                                                                     queue
-                                                                     queuer
-                                                                     nextid
-                                                                     cancelled
-                                                          , Just v
-                                                          )
-                                                        -- available > 0, but cache empty
-                                                        (False, [])                  =>
-                                                          ( MkStripe available cache queue queuer nextid cancelled
-                                                          , Nothing
-                                                          )
-                                                   ) t
-                          in case res of
-                               Nothing =>
-                                 Right Nothing # t
-                               Just v  =>
-                                 Right (Just (v, lp')) # t
+      let lp                                                          # t := getLocalPool pool t
+          Right lp'@(MkLocalPool1 stripeid stripe1@(MkStripe1 striperef)) := lp
+            | Left poolerrs =>
+                Left (Left poolerrs) # t
+          -- clean stripe if needed
+          cleanedstripe                                               # t := cleanStripeIfNeeded ttl free (stripeid, (MkStripe1 striperef)) t
+          Right ()                                                        := cleanedstripe
+            | Left stripeerrs =>
+                Left (Right stripeerrs) # t
+          -- attempt fast-path only
+          res                                                         # t :=
+            casupdate1 striperef (\(MkStripe available cache queue queuer nextid cancelled) =>
+                                    case (available == 0, cache) of
+                                      -- no capacity, do nothing
+                                      (True, _)                    =>
+                                        ( MkStripe available cache queue queuer nextid cancelled
+                                        , Nothing
+                                        )
+                                      -- cache hit, consume
+                                      (False, MkEntry v _ :: rest) =>
+                                        ( MkStripe available
+                                                   rest
+                                                   queue
+                                                   queuer
+                                                   nextid
+                                                   cancelled
+                                        , Just v
+                                        )
+                                      -- available > 0, but cache empty
+                                      (False, [])                  =>
+                                        ( MkStripe available cache queue queuer nextid cancelled
+                                        , Nothing
+                                        )
+                                 ) t
+          Just v                                                          := res
+            | Nothing =>
+                Right Nothing # t
+        in Right (Just (v, lp')) # t
     tryTakeResource' :  {n : Nat}
                      -> MCancel (Elin World)
                      => Pool1 World n a
@@ -1416,33 +1349,28 @@ tryWithResource :  {n : Nat}
                 -> (a -> IO r)
                 -> F1 World (Either (Either (List Pool1Error) (List StripeError)) (Maybe r))
 tryWithResource pool@(MkPool1 _ localpools) f t =
-  let res # t := ioToF1 (runElinIO (tryWithResource' pool f)) t
-    in case res of
-         Left err   =>
-           let realtimenow # t := ioToF1 (runElinIO grabRealTime) t
-             in case realtimenow of
-                  Left realtimenowerr =>
-                    let newerrors := [ MkPool1Error "Data.Pool.tryWithResource" (show realtimenowerr) Nothing
-                                     , MkPool1Error "Data.Pool.tryWithResource" (show err) Nothing
-                                     ]
-                      in Left (Left newerrors) # t
-                  Right realtimenow'  =>
-                    let newerrors := [MkPool1Error "Data.Pool.tryWithResource" (show err) (Just realtimenow')]
-                      in Left (Left newerrors) # t
-         Right res' =>
-           case res' of
-             Right res'' =>
-               case res'' of
-                 Nothing     =>
-                   Right Nothing # t
-                 Just res''' =>
-                   Right (Just res''') # t
-             Left errs  =>
-               case errs of
-                 Left poolerrs    =>
-                   Left (Left poolerrs) # t
-                 Right stripeerrs =>
-                   Left (Right stripeerrs) # t 
+  let res     # t := ioToF1 (runElinIO (tryWithResource' pool f)) t
+      Right res'  := res
+        | Left err =>
+            let realtimenow    # t := ioToF1 (runElinIO grabRealTime) t
+                Right realtimenow' := realtimenow
+                  | Left realtimenowerr =>
+                      let newerrors := [ MkPool1Error "Data.Pool.tryWithResource" (show realtimenowerr) Nothing
+                                       , MkPool1Error "Data.Pool.tryWithResource" (show err) Nothing
+                                       ]
+                        in Left (Left newerrors) # t
+                newerrors := [MkPool1Error "Data.Pool.tryWithResource" (show err) (Just realtimenow')]
+              in Left (Left newerrors) # t
+      Right res'' := res'
+        | Left errs =>
+            let Right stripeerrs := errs
+                  | Left poolerrs =>
+                      Left (Left poolerrs) # t
+              in Left (Right stripeerrs) # t
+      Just res''' := res''
+        | Nothing =>
+            Right Nothing # t
+    in Right (Just res''') # t
   where
     tryWithResource' :  {n : Nat}
                      -> MCancel (Elin World)
@@ -1451,25 +1379,21 @@ tryWithResource pool@(MkPool1 _ localpools) f t =
                      -> Elin World [Errno] (Either (Either (List Pool1Error) (List StripeError)) (Maybe r))
     tryWithResource' pool@(MkPool1 _ localpools) f =
       uncancelable $ \poll => do
-        res <- runIO (tryTakeResource pool)
-        case res of
-          Left errs =>
-            case errs of
-              Left poolerrs    =>
-                pure (Left (Left poolerrs))
-              Right stripeerrs =>
-                pure (Left (Right stripeerrs))
-          Right res' =>
-            case res' of
-              Nothing                                                   =>
-                pure (Right Nothing)
-              Just (res'', MkLocalPool1 stripeid (MkStripe1 striperef)) => do
-                res''' <- onAbort (poll $ liftIO $ f res'') ( do _ <- runIO (destroyResource (stripeid, (MkStripe1 striperef)))
-                                                                 liftIO (pure ())
-                                                            )
-                putr <- runIO (putResource pool (stripeid, (MkStripe1 striperef)) res'')
-                case putr of
-                  Left stripeerrs =>
-                    pure (Left (Right stripeerrs))
-                  Right ()        =>
-                    pure (Right (Just res'''))
+        res                                                           <- runIO (tryTakeResource pool)
+        let Right res'                                                := res
+              | Left errs =>
+                  let Right stripeerrs := errs
+                        | Left poolerrs =>
+                            pure (Left (Left poolerrs))
+                    in pure (Left (Right stripeerrs))
+        let Just (res'', MkLocalPool1 stripeid (MkStripe1 striperef)) := res'
+              | Nothing =>
+                  pure (Right Nothing)
+        res''' <- onAbort (poll $ liftIO $ f res'') ( do _ <- runIO (destroyResource (stripeid, (MkStripe1 striperef)))
+                                                         liftIO (pure ())
+                                                    )
+        putr <- runIO (putResource pool (stripeid, (MkStripe1 striperef)) res'')
+        let Right ()                                                  := putr
+              | Left stripeerrs =>
+                  pure (Left (Right stripeerrs))
+        pure (Right (Just res'''))
